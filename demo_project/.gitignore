@@ -1,0 +1,7 @@
+.env
+.env.*
+!.env.example
+.lmcache/
+published/
+__pycache__/
+*.pyc

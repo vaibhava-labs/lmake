@@ -1,0 +1,26 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "lmake"
+version = "0.1.0"
+description = "A tiny git-native build tool for LLM workflows"
+readme = "README.md"
+requires-python = ">=3.10"
+license = {text = "MIT"}
+authors = [{name = "lmake prototype contributors"}]
+dependencies = ["PyYAML>=6.0"]
+
+[project.optional-dependencies]
+litellm = ["litellm>=1.0"]
+dspy = ["dspy>=3.0"]
+web = ["fastapi>=0.115", "uvicorn>=0.30", "pydantic>=2.0"]
+
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+lmake = "lmake.cli:main"
+
+[tool.setuptools]
+packages = ["lmake"]

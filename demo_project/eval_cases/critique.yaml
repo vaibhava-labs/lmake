@@ -1,0 +1,21 @@
+version: 1
+target: critique
+cases:
+  - name: critique has confidence section
+    output: critique
+    required_headings:
+      - Confidence
+  - name: critique names evidence gaps
+    output: critique
+    required_headings:
+      - Evidence Gaps
+  - name: critique includes follow-up data plan
+    output: critique
+    required_headings:
+      - Suggested Next Data To Collect
+  - name: critique checks traceability
+    output: critique
+    contains: Traceability Check
+  - name: critique stays readable
+    output: critique
+    max_words: 700

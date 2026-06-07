@@ -1,0 +1,13 @@
+.env
+.env.*
+!.env.example
+.lmcache/
+runs/
+published/
+.pytest_cache/
+.claude/
+*.egg-info/
+build/
+dist/
+__pycache__/
+*.pyc

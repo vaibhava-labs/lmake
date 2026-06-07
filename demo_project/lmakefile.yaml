@@ -1,0 +1,70 @@
+version: 1
+
+defaults:
+  provider: mock
+  model: mock/local-research-demo
+  cache:
+    reuse_policy: input-identical
+
+default_group: update
+
+groups:
+  update:
+    targets:
+      - critique
+  brief:
+    targets:
+      - synthesize
+
+targets:
+  extract:
+    description: Extract claims, evidence, and risks from source material.
+    runner: dspy
+    program: programs/research_demo.py
+    inputs:
+      - context/*.md
+    prompt: prompts/extract.md
+    dspy:
+      action: run
+      # Override the default run_program hook for this target.
+      run: run_extract
+      configure: false
+    outputs:
+      claims: artifacts/claims.md
+
+  synthesize:
+    description: Turn extracted claims into a readable research brief.
+    runner: dspy
+    needs:
+      - extract
+    program: programs/research_demo.py
+    inputs:
+      - context/*.md
+      - artifacts/claims.md
+    prompt: prompts/synthesize.md
+    dspy:
+      action: run
+      # Override the default run_program hook for this target.
+      run: run_synthesize
+      configure: false
+    outputs:
+      synthesis: artifacts/synthesis.md
+
+  critique:
+    description: Critique the brief and identify follow-up questions.
+    runner: dspy
+    needs:
+      - synthesize
+    program: programs/research_demo.py
+    inputs:
+      - context/*.md
+      - artifacts/claims.md
+      - artifacts/synthesis.md
+    prompt: prompts/critique.md
+    dspy:
+      action: run
+      # Override the default run_program hook for this target.
+      run: run_critique
+      configure: false
+    outputs:
+      critique: artifacts/critique.md

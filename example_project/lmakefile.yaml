@@ -1,0 +1,29 @@
+version: 1
+
+defaults:
+  provider: mock
+  model: mock/deterministic
+  params:
+    temperature: 0
+  cache:
+    reuse_policy: input-identical
+
+targets:
+  extract:
+    description: Extract claims from source context.
+    inputs:
+      - context/*.md
+    prompt: prompts/extract.md
+    outputs:
+      claims: artifacts/claims.md
+
+  report:
+    description: Synthesize a short report from claims and context.
+    needs:
+      - extract
+    inputs:
+      - context/*.md
+      - artifacts/claims.md
+    prompt: prompts/report.md
+    outputs:
+      report: artifacts/report.md
