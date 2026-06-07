@@ -461,3 +461,7 @@ cases:
     output: report
     max_words: 500
 """
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

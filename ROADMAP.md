@@ -12,6 +12,7 @@
 - [x] publish/serve CLI entrypoints
 - [x] deterministic mock provider
 - [x] optional LiteLLM provider
+- [x] private-alpha package metadata and Git install docs under `lmake-ai`
 
 ## v0.2: correctness hardening
 
@@ -62,7 +63,7 @@
 - [x] single Update button backed by `default_group`
 - [x] developer-mode toggle for targets/runs/details
 - [x] static HTML publish bundle
-- [x] optional `lmake[web]` packaging with no Node requirement for users
+- [x] optional `lmake-ai[web]` packaging with no Node requirement for users
 - [x] rendered Markdown artifact viewer beyond preformatted text in the web UI
 - [x] published report bundles with optional baseline/eval provenance
 - [x] WebSocket live staleness updates
@@ -78,3 +79,4 @@
 - [x] static HTML run browser via GitHub Pages demo
 - [ ] PR comment summaries
 - [ ] optional hosted artifact viewer
+- [ ] PyPI/TestPyPI release under the non-conflicting `lmake-ai` distribution name

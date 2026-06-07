@@ -36,9 +36,35 @@ project/
 
 `.lmcache/` is local cache. `runs/`, `artifacts/`, `eval_cases/`, and `baselines/` are intentionally plain files so teams can decide whether to commit, branch, diff, review, approve, or publish them.
 
-## Install locally
+## Install
 
-From this directory:
+The CLI command is `lmake`. The Python distribution name is `lmake-ai` because `lmake` is already taken on PyPI. This repo is still private alpha, so install from Git for now.
+
+For collaborators with GitHub SSH access:
+
+```bash
+pipx install "git+ssh://git@github.com/vaibhava-enzo/lmake.git"
+```
+
+Or with `pip`:
+
+```bash
+python -m pip install "git+ssh://git@github.com/vaibhava-enzo/lmake.git"
+```
+
+For the web UI from Git:
+
+```bash
+python -m pip install "lmake-ai[web] @ git+ssh://git@github.com/vaibhava-enzo/lmake.git"
+```
+
+For local development from this checkout:
+
+```bash
+python -m pip install -e '.[web,dev]'
+```
+
+For the minimal editable CLI install:
 
 ```bash
 python -m pip install -e .
