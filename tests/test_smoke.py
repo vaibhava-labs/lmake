@@ -13,7 +13,7 @@ from lmake.errors import ConfigError, TargetError
 from lmake.gc import gc_project
 from lmake.publish import publish_run
 from lmake.state import ProjectState
-from lmake.web import context_files, create_app, safe_context_path
+from lmake.web import context_files, create_app, project_snapshot, safe_context_path, snapshot_signature
 
 
 def write_lmakefile(tmp_path, text):
@@ -637,6 +637,26 @@ def test_web_review_endpoints_eval_approve_and_compare(tmp_path, monkeypatch):
     assert compare_data["target"] == "report"
     assert "# lmake compare" in compare_data["text"]
     assert "fingerprint:  unchanged" in compare_data["text"]
+
+
+def test_web_state_signature_changes_for_live_staleness(tmp_path, monkeypatch):
+    pytest.importorskip("fastapi")
+    monkeypatch.chdir(tmp_path)
+    assert main(["init"]) == 0
+    assert main(["run"]) == 0
+    app = create_app(tmp_path)
+
+    route_paths = {getattr(route, "path", "") for route in app.routes}
+    assert "/api/events" in route_paths
+    before = project_snapshot(tmp_path)
+    before_signature = snapshot_signature(before)
+
+    brief = tmp_path / "context" / "brief.md"
+    brief.write_text(brief.read_text(encoding="utf-8") + "\nLive staleness fact.\n", encoding="utf-8")
+    after = project_snapshot(tmp_path)
+
+    assert snapshot_signature(after) != before_signature
+    assert {item["target"]: item["status"] for item in after["statuses"]}["report"] == "stale"
 
 
 def test_gc_prunes_old_runs_but_keeps_reused_output_objects(tmp_path, monkeypatch):

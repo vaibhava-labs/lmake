@@ -2,6 +2,7 @@
 .env.*
 !.env.example
 .lmcache/
+baselines/
 published/
 __pycache__/
 *.pyc

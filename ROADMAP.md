@@ -26,7 +26,7 @@
 - [ ] no-op mode that does not record reuse manifests
 - [ ] manifest signing/checking
 - [ ] richer status propagation through large DAGs / Kahn-style traversal
-- [ ] CI smoke tests
+- [x] CI smoke tests
 
 ## v0.3: LLM-native features
 
@@ -65,15 +65,16 @@
 - [x] optional `lmake[web]` packaging with no Node requirement for users
 - [x] rendered Markdown artifact viewer beyond preformatted text in the web UI
 - [x] published report bundles with optional baseline/eval provenance
-- [ ] file watcher / live staleness updates
+- [x] WebSocket live staleness updates
 - [ ] richer non-technical conflict resolution UI
 - [ ] authenticated multi-user server mode
-- [ ] remote publish target such as GitHub Pages or S3
+- [x] GitHub Pages demo publish workflow
+- [ ] remote publish target such as S3
 
 ## v0.6: automation and remote
 
 - [ ] remote cache spec
-- [ ] GitHub Action
-- [ ] static HTML run browser
+- [x] GitHub Action
+- [x] static HTML run browser via GitHub Pages demo
 - [ ] PR comment summaries
 - [ ] optional hosted artifact viewer

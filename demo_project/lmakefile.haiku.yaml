@@ -1,0 +1,64 @@
+version: 1
+
+defaults:
+  provider: litellm
+  model: anthropic/claude-haiku-4-5-20251001
+  params:
+    temperature: 0
+  cache:
+    reuse_policy: input-identical
+  system: |
+    You write concise Markdown for a reviewable LLM workflow demo.
+    Preserve concrete source details and use clear section headings.
+
+default_group: update
+
+groups:
+  update:
+    targets:
+      - critique
+  brief:
+    targets:
+      - synthesize
+
+targets:
+  extract:
+    description: Extract claims, evidence, and risks from source material.
+    inputs:
+      - context/*.md
+    prompt: prompts/extract.md
+    outputs:
+      claims: artifacts/claims.md
+
+  synthesize:
+    description: Turn extracted claims into a readable research brief.
+    needs:
+      - extract
+    inputs:
+      - context/*.md
+      - artifacts/claims.md
+    prompt: prompts/synthesize.md
+    outputs:
+      synthesis: artifacts/synthesis.md
+
+  critique:
+    description: Critique the brief and identify follow-up questions.
+    needs:
+      - synthesize
+    system: |
+      Return Markdown with these exact headings:
+      # Critique And Follow-Up Plan
+      ## Confidence
+      ## What The Brief Gets Right
+      ## Evidence Gaps
+      ## Risks
+      ## Open Questions
+      ## Suggested Next Data To Collect
+      ## Traceability Check
+    inputs:
+      - context/*.md
+      - artifacts/claims.md
+      - artifacts/synthesis.md
+    prompt: prompts/critique.md
+    outputs:
+      critique: artifacts/critique.md

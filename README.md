@@ -1,14 +1,23 @@
 # lmake
 
-`lmake` is a tiny, local-first build tool for LLM workflows.
+`lmake` makes LLM-generated artifacts reviewable: run them, eval them, compare them to a baseline, approve them, and publish them with provenance.
 
-The design target is:
+It is deliberately small and local-first. The repo format is the product primitive:
+
+- `context/` holds source material.
+- `prompts/` and `programs/` hold generation logic.
+- `runs/` records immutable manifests.
+- `artifacts/` holds promoted outputs.
+- `eval_cases/` defines deterministic quality gates.
+- `baselines/` records what the team has approved.
+
+Under the hood, `lmake` is a tiny build tool for LLM workflows. The design target is still:
 
 ```text
 lmake : GitHub :: git : GitHub
 ```
 
-The CLI and repo format are the primitive. SaaS collaboration, dashboards, hosted artifact browsing, semantic diffs, and fleet execution can sit on top later.
+The CLI and file format come first. Collaboration, dashboards, hosted artifact browsing, semantic diffs, and fleet execution can sit on top.
 
 ## Project layout
 
@@ -134,6 +143,16 @@ It uses four source documents in `context/` and produces:
 
 The target graph is `extract -> synthesize -> critique`, with `default_group: update` so both the CLI and web UI can use one Update action.
 The demo also includes eval cases for `critique`, so you can run `lmake eval critique`, `lmake approve critique`, edit context, run again, and use `lmake compare critique`.
+
+## Hosted demo
+
+The GitHub Pages workflow publishes the demo report on every push to `main`:
+
+```text
+https://vaibhava-enzo.github.io/lmake/
+```
+
+That static bundle is generated from `demo_project`, includes rendered artifacts, `manifest.json`, and `review.json` with baseline/eval provenance.
 
 ## lmakefile.yaml v0
 
@@ -301,6 +320,8 @@ At runtime the target uses the resolved model from `lmake.lock`. The fingerprint
 
 `lmake serve` starts a local web UI over the same files. Collaborators edit only `context/` documents, save with optimistic locking, click Update, read rendered artifacts, and publish the latest run. Developer mode is a toggle that reveals targets, runs, fingerprints, provider details, evals, baseline comparison, and approval.
 
+The UI also opens a lightweight WebSocket state stream. If files change outside the browser, the page refreshes staleness and artifact state without a manual reload.
+
 ```bash
 lmake serve
 ```
@@ -331,6 +352,15 @@ published/<run_id>/
 `review.json` records the approved baseline relationship and deterministic eval results for the published run. Pass `--no-review` to omit that section and sidecar.
 
 `lmake init` ignores `published/` by default. Commit a published bundle only when you deliberately want that static report in Git.
+
+## CI and Pages
+
+This repository includes two GitHub Actions workflows:
+
+- `CI`: installs `lmake[web]`, runs tests, compiles the package, and smoke-tests the demo workflow.
+- `Publish Demo`: runs the deterministic demo, approves the critique target, publishes the static bundle, and deploys it to GitHub Pages.
+
+GitHub Pages may need to be enabled for the repository with source set to GitHub Actions.
 
 ## Garbage collection
 

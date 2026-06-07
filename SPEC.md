@@ -213,6 +213,8 @@ Program modules may provide `build_program()`, `compile_program(...)`, and `run_
 
 `lmake serve` is a local web view over the same project directory. It does not introduce a new database or canonical state. Non-technical collaborators edit `context/` files, see human-readable staleness, run the default group, read artifacts, and publish a static bundle. Details mode may expose developer review operations such as eval, baseline compare, and approve without changing the collaborator default view.
 
+The web server may expose a local WebSocket state stream at `/api/events`. The stream sends project snapshots when source files, artifacts, statuses, baselines, or run history change, so browser clients can update staleness without reloading.
+
 `lmake publish` emits a static HTML bundle for a run:
 
 ```text
@@ -224,6 +226,8 @@ published/<run_id>/
 ```
 
 The bundle is derived from the manifest and content-addressed objects. When `review.json` is present, it uses schema `lmake.publish_review.v0` and records the published run's relationship to the current approved baseline plus deterministic eval results for the published run. `lmake publish --latest` resolves through the configured default group/output target before falling back to the newest manifest.
+
+The repository's demo can be published by CI to GitHub Pages by running the default group, evaluating, approving, and publishing the terminal artifact bundle.
 
 ## 11. Future spec items
 

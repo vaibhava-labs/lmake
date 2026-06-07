@@ -22,3 +22,21 @@ lmake serve
 
 The default group is `update`, which runs the terminal `critique` target and all of its dependencies.
 After approving a baseline, edit a context file, run `lmake run`, and use `lmake compare critique` to see what changed against the approved run.
+
+## Real Haiku run
+
+The default demo uses deterministic local hooks. To try the same workflow with a real low-cost Anthropic model:
+
+```bash
+python -m pip install -e '.[litellm]'
+cp .env.example .env
+# Fill ANTHROPIC_API_KEY in .env, then export it into your shell.
+set -a; . ./.env; set +a
+cp lmakefile.haiku.yaml lmakefile.yaml
+lmake run
+lmake eval critique
+lmake approve critique
+lmake publish --latest
+```
+
+Keep `.env` out of Git. The sample `.gitignore` already does.

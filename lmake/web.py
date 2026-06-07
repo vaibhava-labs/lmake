@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import html
 import json
 import subprocess
@@ -109,9 +110,29 @@ def project_snapshot(root: Path) -> dict[str, Any]:
     }
 
 
+def snapshot_signature(snapshot: dict[str, Any]) -> str:
+    summary = {
+        "context_files": [(item.get("path"), item.get("sha256")) for item in snapshot.get("context_files", [])],
+        "artifacts": [(item.get("path"), item.get("sha256")) for item in snapshot.get("artifacts", [])],
+        "baselines": [(item.get("target"), item.get("run_id"), item.get("set_at")) for item in snapshot.get("baselines", [])],
+        "statuses": [
+            (
+                item.get("target"),
+                item.get("status"),
+                item.get("latest_run_id"),
+                item.get("current_fingerprint"),
+                item.get("latest_fingerprint"),
+            )
+            for item in snapshot.get("statuses", [])
+        ],
+        "runs": [(item.get("run_id"), item.get("target"), item.get("cache_state")) for item in snapshot.get("runs", [])],
+    }
+    return json.dumps(summary, sort_keys=True)
+
+
 def create_app(root: Path):
     try:
-        from fastapi import Body, FastAPI, HTTPException
+        from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
         from fastapi.responses import HTMLResponse
     except ImportError as exc:  # pragma: no cover - exercised by CLI message
         raise LMakeError("lmake serve requires `python -m pip install -e '.[web]'`.") from exc
@@ -133,6 +154,24 @@ def create_app(root: Path):
     @app.get("/api/state")
     def api_state() -> dict[str, Any]:
         return project_snapshot(root)
+
+    @app.websocket("/api/events")
+    async def api_events(websocket: WebSocket) -> None:
+        await websocket.accept()
+        last_signature = None
+        try:
+            while True:
+                try:
+                    snapshot = project_snapshot(root)
+                    signature = snapshot_signature(snapshot)
+                    if signature != last_signature:
+                        await websocket.send_json({"type": "state", "state": snapshot})
+                        last_signature = signature
+                except Exception as exc:
+                    await websocket.send_json({"type": "error", "message": str(exc)})
+                await asyncio.sleep(1)
+        except WebSocketDisconnect:
+            return
 
     @app.get("/api/context/{relpath:path}")
     def api_get_context(relpath: str) -> dict[str, Any]:
@@ -373,6 +412,8 @@ APP_HTML = r"""<!doctype html>
     let activeSha = null;
     let activeArtifactPath = null;
     let reviewTarget = null;
+    let reviewExtraHtml = '';
+    let eventsSocket = null;
     let conflict = null;
 
     const $ = id => document.getElementById(id);
@@ -393,6 +434,30 @@ APP_HTML = r"""<!doctype html>
       const res = await fetch('/api/state');
       state = await res.json();
       renderState();
+    }
+
+    function connectEvents() {
+      if (!('WebSocket' in window) || eventsSocket) return;
+      const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
+      const socket = new WebSocket(`${protocol}://${window.location.host}/api/events`);
+      eventsSocket = socket;
+      socket.onmessage = event => {
+        try {
+          const data = JSON.parse(event.data);
+          if (data.type === 'state') {
+            state = data.state;
+            renderState();
+          } else if (data.type === 'error') {
+            $('message').textContent = data.message;
+          }
+        } catch (err) {
+          $('message').textContent = String(err);
+        }
+      };
+      socket.onclose = () => {
+        eventsSocket = null;
+        setTimeout(connectEvents, 2000);
+      };
     }
 
     function renderState() {
@@ -421,19 +486,20 @@ APP_HTML = r"""<!doctype html>
       $('reviewTarget').innerHTML = names.map(name => `<option value="${escapeHtml(name)}" ${name === reviewTarget ? 'selected' : ''}>${escapeHtml(name)}</option>`).join('');
       $('reviewTarget').onchange = e => {
         reviewTarget = e.target.value;
-        renderReviewStatus();
+        renderReviewStatus('');
       };
       renderReviewStatus();
     }
 
     function renderReviewStatus(extraHtml) {
       if (!reviewTarget) return;
+      if (extraHtml !== undefined) reviewExtraHtml = extraHtml || '';
       const baseline = (state.baselines || []).find(item => item.target === reviewTarget);
       const status = state.statuses.find(item => item.target === reviewTarget);
       const baselineText = baseline ? `Baseline: ${baseline.run_id}` : 'Baseline: none';
       const statusText = status ? `Status: ${status.status}` : 'Status: unknown';
       $('reviewOutput').className = 'review-output';
-      $('reviewOutput').innerHTML = `<p class="muted">${escapeHtml(statusText)}<br>${escapeHtml(baselineText)}</p>` + (extraHtml || '');
+      $('reviewOutput').innerHTML = `<p class="muted">${escapeHtml(statusText)}<br>${escapeHtml(baselineText)}</p>` + reviewExtraHtml;
     }
 
     function renderEvalResult(data) {
@@ -566,7 +632,7 @@ APP_HTML = r"""<!doctype html>
       await saveFile(false);
     };
 
-    loadState().catch(err => $('message').textContent = String(err));
+    loadState().then(connectEvents).catch(err => $('message').textContent = String(err));
   </script>
 </body>
 </html>
