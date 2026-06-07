@@ -37,17 +37,26 @@ jobs:
           python -m lmake approve critique
           python -m lmake publish --latest -o ../_site
 
+      - name: Upload static demo artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: lmake-demo-site
+          path: _site
+
       - name: Configure Pages
+        if: ${{ github.event.repository.private == false }}
         uses: actions/configure-pages@v5
         with:
           enablement: true
 
       - name: Upload Pages artifact
+        if: ${{ github.event.repository.private == false }}
         uses: actions/upload-pages-artifact@v3
         with:
           path: _site
 
   deploy:
+    if: ${{ github.event.repository.private == false }}
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

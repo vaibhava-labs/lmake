@@ -144,9 +144,9 @@ It uses four source documents in `context/` and produces:
 The target graph is `extract -> synthesize -> critique`, with `default_group: update` so both the CLI and web UI can use one Update action.
 The demo also includes eval cases for `critique`, so you can run `lmake eval critique`, `lmake approve critique`, edit context, run again, and use `lmake compare critique`.
 
-## Hosted demo
+## Published demo
 
-The GitHub Pages workflow publishes the demo report on every push to `main`:
+The demo workflow builds a static report bundle on every push to `main` and uploads it as a workflow artifact. When the repository is public or otherwise Pages-capable, the same workflow deploys it to GitHub Pages:
 
 ```text
 https://vaibhava-enzo.github.io/lmake/
@@ -358,9 +358,9 @@ published/<run_id>/
 This repository includes two GitHub Actions workflows:
 
 - `CI`: installs `lmake[web]`, runs tests, compiles the package, and smoke-tests the demo workflow.
-- `Publish Demo`: runs the deterministic demo, approves the critique target, publishes the static bundle, and deploys it to GitHub Pages.
+- `Publish Demo`: runs the deterministic demo, approves the critique target, publishes the static bundle, uploads it as a workflow artifact, and deploys it to GitHub Pages when Pages is available.
 
-GitHub Pages may need to be enabled for the repository with source set to GitHub Actions.
+GitHub Pages may need to be enabled for the repository with source set to GitHub Actions. Private repositories require a GitHub plan that supports private Pages, or the repository must be made public.
 
 ## Garbage collection
 
