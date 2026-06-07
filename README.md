@@ -170,6 +170,8 @@ It uses four source documents in `context/` and produces:
 The target graph is `extract -> synthesize -> critique`, with `default_group: update` so both the CLI and web UI can use one Update action.
 The demo also includes eval cases for `critique`, so you can run `lmake eval critique`, `lmake approve critique`, edit context, run again, and use `lmake compare critique`.
 
+See [docs/recipes.md](docs/recipes.md) for the first review-loop recipes, including an opt-in Haiku integration proof.
+
 ## Published demo
 
 The demo workflow builds a static report bundle on every push to `main` and uploads it as a workflow artifact. When the repository is public or otherwise Pages-capable, the same workflow deploys it to GitHub Pages:

@@ -37,6 +37,7 @@
 - [x] append-only approval records
 - [x] `lmake approve`
 - [x] `lmake compare` against approved baseline
+- [x] opt-in real Haiku integration test for prompt iteration review loop
 - [ ] structured output schemas
 - [ ] JSON artifact diff
 - [ ] Markdown-aware diff
@@ -57,6 +58,7 @@
 ## v0.5: collaboration and sharing
 
 - [x] realistic local demo project with extract/synthesize/critique workflow
+- [x] first review-loop recipe docs
 - [x] local web UI MVP
 - [x] context-only document editor
 - [x] optimistic-lock conflict response for collaborators

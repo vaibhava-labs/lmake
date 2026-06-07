@@ -43,3 +43,8 @@ lmake = "lmake.cli:main"
 
 [tool.setuptools]
 packages = ["lmake"]
+
+[tool.pytest.ini_options]
+markers = [
+  "integration_llm: opt-in tests that call real LLM providers and may incur API cost",
+]
