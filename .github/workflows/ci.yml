@@ -27,6 +27,11 @@ jobs:
       - name: Compile package
         run: python -m compileall lmake
 
+      - name: Check package build
+        run: |
+          python -m build
+          python -m twine check dist/*
+
       - name: Smoke test demo project
         run: |
           cd demo_project
