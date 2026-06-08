@@ -38,8 +38,10 @@
 - [x] `lmake approve`
 - [x] `lmake compare` against approved baseline
 - [x] opt-in real Haiku integration test for prompt iteration review loop
+- [x] JSON metric eval checks over structured artifacts
+- [x] numeric JSON metric deltas in `lmake compare`
 - [ ] structured output schemas
-- [ ] JSON artifact diff
+- [ ] full JSON artifact diff
 - [ ] Markdown-aware diff
 - [ ] semantic diff plugin interface
 - [ ] LLM-judge eval attachment format
@@ -69,6 +71,7 @@
 - [x] rendered Markdown artifact viewer beyond preformatted text in the web UI
 - [x] published report bundles with optional baseline/eval provenance
 - [x] WebSocket live staleness updates
+- [x] behavioral regression workflow docs for case/label/suite review loops
 - [ ] richer non-technical conflict resolution UI
 - [ ] authenticated multi-user server mode
 - [x] GitHub Pages demo publish workflow
@@ -82,3 +85,15 @@
 - [ ] PR comment summaries
 - [ ] optional hosted artifact viewer
 - [ ] PyPI/TestPyPI release under the non-conflicting `lmake-ai` distribution name
+
+## v0.7: behavioral regression workflows
+
+- [x] document replayable case, label, suite, metric, fresh-replay, and history-dashboard conventions
+- [x] document the local `run -> eval -> compare -> approve` behavior review loop
+- [ ] sanitized behavioral-regression example project with no domain-specific data
+- [ ] scaffold command or template for `cases/`, `labels/`, `suites/`, and review targets
+- [ ] first-class suite selection ergonomics for smoke/regression/archive workflows
+- [ ] label promotion helper that turns reviewed failures into durable eval labels
+- [ ] history/dashboard recipe backed by immutable run manifests and structured metrics
+- [ ] optional privacy guardrails for replay targets that can call external model providers
+- [ ] publishable behavior review bundle for non-technical collaborators
