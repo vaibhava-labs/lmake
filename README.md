@@ -294,7 +294,25 @@ cases:
     contains: traceable provenance
 ```
 
-Supported checks are `contains`, `not_contains`, `regex`, `required_headings`, `min_words`, `max_words`, `min_bytes`, and `max_bytes`.
+Supported text checks are `contains`, `not_contains`, `regex`, `required_headings`, `min_words`, `max_words`, `min_bytes`, and `max_bytes`.
+
+JSON outputs can be checked with a small selector syntax: root `$`, object keys, and `*` wildcards. JSON eval checks support `equals`, `min`, `max`, `contains`, and `not_contains`.
+
+```yaml
+cases:
+  - name: no malformed responses
+    output: metrics
+    json_path: $.cases.*.*.malformed_responses
+    equals: 0
+  - name: Akshat production did not fail
+    output: metrics
+    path: $.cases.akshat-singh.production.failed
+    equals: 0
+  - name: p95 latency stays under threshold
+    output: metrics
+    json_path: $.cases.*.*.latency_ms.p95
+    max: 800
+```
 
 ```bash
 lmake eval report
@@ -309,7 +327,7 @@ baselines/<target>.json
 baselines/approvals/<target>/<timestamp>_<run_id>.json
 ```
 
-`lmake compare <target>` compares the latest run to the approved baseline: fingerprint changes, output hash changes, eval results, and the normal artifact diff. `lmake gc` keeps baseline runs and their cached objects even when they are older than the normal retention window.
+`lmake compare <target>` compares the latest run to the approved baseline: fingerprint changes, output hash changes, eval results, JSON metric deltas when matching numeric JSON paths changed, and the normal artifact diff. `lmake gc` keeps baseline runs and their cached objects even when they are older than the normal retention window.
 
 ## Real LLM calls through LiteLLM
 

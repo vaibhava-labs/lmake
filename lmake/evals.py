@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -86,6 +87,130 @@ def as_int(value: Any, field_name: str) -> int | None:
     return value
 
 
+def as_number(value: Any, field_name: str) -> int | float | None:
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfigError(f"{field_name} must be a number.")
+    return value
+
+
+def json_path_for_case(case: dict[str, Any]) -> str | None:
+    selector = case.get("json_path", case.get("path"))
+    if selector is None:
+        return None
+    if not isinstance(selector, str) or not selector:
+        raise ConfigError(f"{case.get('name')}.json_path must be a non-empty string.")
+    return selector
+
+
+def parse_json_path(selector: str) -> list[str]:
+    if selector == "$":
+        return []
+    if not selector.startswith("$."):
+        raise ConfigError(f"json_path {selector!r} must start with '$' or '$.'.")
+    parts = selector[2:].split(".")
+    if any(part == "" for part in parts):
+        raise ConfigError(f"json_path {selector!r} has an empty path segment.")
+    return parts
+
+
+def child_values(value: Any, segment: str, path: str) -> list[tuple[str, Any]]:
+    if segment == "*":
+        if isinstance(value, dict):
+            return [(f"{path}.{key}", child) for key, child in value.items()]
+        if isinstance(value, list):
+            return [(f"{path}[{index}]", child) for index, child in enumerate(value)]
+        return []
+    if isinstance(value, dict):
+        if segment not in value:
+            return []
+        return [(f"{path}.{segment}", value[segment])]
+    if isinstance(value, list) and segment.isdigit():
+        index = int(segment)
+        if 0 <= index < len(value):
+            return [(f"{path}[{index}]", value[index])]
+    return []
+
+
+def select_json_path(value: Any, selector: str) -> list[tuple[str, Any]]:
+    matches = [("$", value)]
+    for segment in parse_json_path(selector):
+        next_matches: list[tuple[str, Any]] = []
+        for path, item in matches:
+            next_matches.extend(child_values(item, segment, path))
+        matches = next_matches
+        if not matches:
+            break
+    return matches
+
+
+def json_value_text(value: Any) -> str:
+    if isinstance(value, str):
+        return value
+    return json.dumps(value, ensure_ascii=False, sort_keys=True)
+
+
+def evaluate_json_case(text: str, case: dict[str, Any], selector: str) -> tuple[bool, str]:
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError as exc:
+        return False, f"output is not valid JSON: {exc.msg}"
+
+    matches = select_json_path(payload, selector)
+    if not matches:
+        return False, f"json_path {selector!r} matched no values"
+
+    checks = 0
+    selected_text = "\n".join(json_value_text(value) for _, value in matches)
+
+    if "equals" in case:
+        checks += 1
+        expected = case.get("equals")
+        if isinstance(expected, list):
+            actual = [value for _, value in matches]
+            if actual != expected:
+                return False, f"selected values {actual!r} != expected {expected!r}"
+        else:
+            for path, value in matches:
+                if value != expected:
+                    return False, f"{path} value {value!r} != expected {expected!r}"
+
+    minimum = as_number(case.get("min"), f"{case.get('name')}.min")
+    if minimum is not None:
+        checks += 1
+        for path, value in matches:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return False, f"{path} value {value!r} is not numeric"
+            if value < minimum:
+                return False, f"{path} value {value!r} is below minimum {minimum!r}"
+
+    maximum = as_number(case.get("max"), f"{case.get('name')}.max")
+    if maximum is not None:
+        checks += 1
+        for path, value in matches:
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                return False, f"{path} value {value!r} is not numeric"
+            if value > maximum:
+                return False, f"{path} value {value!r} is above maximum {maximum!r}"
+
+    missing = [needle for needle in as_strings(case.get("contains"), f"{case.get('name')}.contains") if needle not in selected_text]
+    if case.get("contains") is not None:
+        checks += 1
+    if missing:
+        return False, "missing text in selected JSON values: " + ", ".join(repr(item) for item in missing)
+
+    present = [needle for needle in as_strings(case.get("not_contains"), f"{case.get('name')}.not_contains") if needle in selected_text]
+    if case.get("not_contains") is not None:
+        checks += 1
+    if present:
+        return False, "forbidden text present in selected JSON values: " + ", ".join(repr(item) for item in present)
+
+    if checks == 0:
+        raise ConfigError(f"eval case {case.get('name')!r} does not define any JSON checks.")
+    return True, f"{len(matches)} selected JSON value(s), {checks} check(s) passed"
+
+
 def load_eval_suite(config: ProjectConfig, target: str, suite_path: Path | None = None) -> dict[str, Any] | None:
     path = suite_path or eval_path(config.root, target)
     if not path.exists():
@@ -155,6 +280,10 @@ def headings(text: str) -> list[str]:
 
 
 def evaluate_case(text: str, case: dict[str, Any]) -> tuple[bool, str]:
+    selector = json_path_for_case(case)
+    if selector is not None:
+        return evaluate_json_case(text, case, selector)
+
     checks = 0
     missing = [needle for needle in as_strings(case.get("contains"), f"{case.get('name')}.contains") if needle not in text]
     if case.get("contains") is not None:

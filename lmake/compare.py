@@ -1,12 +1,31 @@
 from __future__ import annotations
 
+import json
 from typing import Any
 
 from .baseline import load_baseline, latest_manifest
 from .config import ProjectConfig
 from .engine import diff_runs
-from .errors import ConfigError
-from .evals import evaluate_target
+from .errors import ConfigError, RunNotFoundError
+from .evals import evaluate_target, text_from_output
+from .state import ProjectState
+
+
+INTERESTING_METRIC_KEYS = {
+    "failed",
+    "passed",
+    "visible_outputs",
+    "max_visible_gap_seconds",
+    "total_cost_cents",
+    "malformed_responses",
+}
+
+INTERESTING_METRIC_FRAGMENTS = (
+    ".latency_ms.p95",
+    ".latency.p95",
+    ".cost.",
+    ".cost_",
+)
 
 
 def output_hashes(manifest: dict[str, Any]) -> dict[str, str]:
@@ -24,6 +43,98 @@ def changed_execution(left: dict[str, Any], right: dict[str, Any]) -> list[str]:
         if left.get(key) != right.get(key):
             changes.append(f"- {key}: {left.get(key)!r} -> {right.get(key)!r}")
     return changes
+
+
+def is_number(value: Any) -> bool:
+    return not isinstance(value, bool) and isinstance(value, (int, float))
+
+
+def metric_path(root: str, key: str) -> str:
+    return f"{root}.{key}" if root else f"$.{key}"
+
+
+def flatten_numeric(value: Any, path: str = "$") -> dict[str, int | float]:
+    found: dict[str, int | float] = {}
+    if isinstance(value, dict):
+        for key in sorted(value):
+            found.update(flatten_numeric(value[key], metric_path(path, str(key))))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            found.update(flatten_numeric(item, f"{path}[{index}]"))
+    elif is_number(value):
+        found[path] = value
+    return found
+
+
+def load_json_output(state: ProjectState, item: dict[str, Any]) -> Any | None:
+    try:
+        text = text_from_output(state, item)
+    except (ConfigError, RunNotFoundError):
+        return None
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        return None
+
+
+def metric_priority(path: str) -> tuple[int, str]:
+    last = path.rsplit(".", 1)[-1]
+    if last in INTERESTING_METRIC_KEYS or any(fragment in path for fragment in INTERESTING_METRIC_FRAGMENTS):
+        return (0, path)
+    return (1, path)
+
+
+def format_number(value: int | float) -> str:
+    if isinstance(value, float) and value.is_integer():
+        return str(int(value))
+    return f"{value:g}"
+
+
+def format_delta(value: int | float) -> str:
+    formatted = format_number(value)
+    if value > 0:
+        return f"+{formatted}"
+    return formatted
+
+
+def metric_delta_rows(state: ProjectState, baseline: dict[str, Any], latest: dict[str, Any]) -> list[dict[str, str]]:
+    baseline_outputs = {str(item.get("name")): item for item in baseline.get("outputs", [])}
+    latest_outputs = {str(item.get("name")): item for item in latest.get("outputs", [])}
+    rows: list[dict[str, str]] = []
+    for output_name in sorted(set(baseline_outputs) & set(latest_outputs)):
+        left_json = load_json_output(state, baseline_outputs[output_name])
+        right_json = load_json_output(state, latest_outputs[output_name])
+        if left_json is None or right_json is None:
+            continue
+        left_metrics = flatten_numeric(left_json)
+        right_metrics = flatten_numeric(right_json)
+        for path in sorted(set(left_metrics) & set(right_metrics), key=metric_priority):
+            left_value = left_metrics[path]
+            right_value = right_metrics[path]
+            if left_value == right_value:
+                continue
+            rows.append({
+                "output": output_name,
+                "path": path,
+                "baseline": format_number(left_value),
+                "latest": format_number(right_value),
+                "delta": format_delta(right_value - left_value),
+            })
+    return rows
+
+
+def metric_delta_section(state: ProjectState, baseline: dict[str, Any], latest: dict[str, Any]) -> list[str]:
+    rows = metric_delta_rows(state, baseline, latest)
+    if not rows:
+        return []
+    chunks = [
+        "\n## Metric Deltas\n",
+        "| output | path | baseline | latest | delta |\n",
+        "|---|---|---:|---:|---:|\n",
+    ]
+    for row in rows:
+        chunks.append(f"| {row['output']} | `{row['path']}` | {row['baseline']} | {row['latest']} | {row['delta']} |\n")
+    return chunks
 
 
 def eval_section(config: ProjectConfig, target: str, baseline_run: str, latest_run: str) -> list[str]:
@@ -48,6 +159,9 @@ def compare_to_baseline(config: ProjectConfig, target: str, *, with_evals: bool 
     if baseline is None:
         raise ConfigError(f"target {target!r} has no baseline. Use `lmake baseline set {target} <run_id>` or `lmake approve {target}`.")
     latest = latest_manifest(config, target)
+    state = ProjectState(config.root)
+    state.ensure_dirs()
+    state.recover_staged_runs()
     baseline_run = str(baseline.get("run_id"))
     latest_run = str(latest.get("run_id"))
 
@@ -73,6 +187,7 @@ def compare_to_baseline(config: ProjectConfig, target: str, *, with_evals: bool 
     if execution_changes:
         chunks.append("\n## Execution Changes\n")
         chunks.extend(line + "\n" for line in execution_changes)
+    chunks.extend(metric_delta_section(state, baseline, latest))
     if with_evals:
         chunks.extend(eval_section(config, target, baseline_run, latest_run))
     chunks.append("\n")

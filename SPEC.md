@@ -156,6 +156,18 @@ Eval cases are deterministic checks against artifact bytes restored from the con
 - `required_headings`
 - `min_words` / `max_words`
 - `min_bytes` / `max_bytes`
+- JSON selectors with root `$`, object keys, and `*` wildcards
+- JSON value checks: `equals`, `min`, `max`, `contains`, `not_contains`
+
+Example JSON metric eval:
+
+```yaml
+cases:
+  - name: p95 latency stays under threshold
+    output: metrics
+    json_path: $.cases.*.*.latency_ms.p95
+    max: 800
+```
 
 Approved baselines live at:
 
@@ -166,7 +178,7 @@ baselines/approvals/<target>/<timestamp>_<run_id>.json
 
 `baselines/<target>.json` records the approved run ID, target fingerprint, output SHA-256 values, provider/model, prior baseline run, and setter identity from Git config when available. Approval records are append-only audit entries for each approval event.
 
-`lmake approve <target>` requires the latest run for the target to be fresh. If an eval suite exists, all eval cases must pass unless the user explicitly passes `--skip-evals`. `lmake compare <target>` compares the latest run against the baseline pointer, including fingerprint/output changes, eval results, and artifact diffs.
+`lmake approve <target>` requires the latest run for the target to be fresh. If an eval suite exists, all eval cases must pass unless the user explicitly passes `--skip-evals`. `lmake compare <target>` compares the latest run against the baseline pointer, including fingerprint/output changes, eval results, JSON metric deltas for matching numeric paths, and artifact diffs.
 
 Garbage collection must keep baseline run manifests and every content-addressed output object referenced by kept baseline manifests.
 

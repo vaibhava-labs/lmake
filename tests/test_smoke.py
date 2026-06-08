@@ -100,6 +100,151 @@ cases:
     assert main(["approve", "report", "--skip-evals"]) == 0
 
 
+def write_metrics_project(tmp_path, metrics):
+    (tmp_path / "context").mkdir()
+    (tmp_path / "programs").mkdir()
+    (tmp_path / "eval_cases").mkdir()
+    (tmp_path / "context" / "metrics.json").write_text(json.dumps(metrics, indent=2, sort_keys=True), encoding="utf-8")
+    (tmp_path / "programs" / "metrics_program.py").write_text(
+        """
+import json
+
+
+def run_program(inputs):
+    source = next(part.text for part in inputs if part.path == "context/metrics.json")
+    return {"metrics": json.loads(source)}
+""".lstrip(),
+        encoding="utf-8",
+    )
+    write_lmakefile(
+        tmp_path,
+        """
+version: 1
+defaults:
+  provider: mock
+  model: mock/deterministic
+targets:
+  metrics:
+    runner: dspy
+    program: programs/metrics_program.py
+    inputs:
+      - context/metrics.json
+    dspy:
+      action: run
+      configure: false
+    outputs:
+      metrics: artifacts/metrics.json
+""",
+    )
+
+
+def sample_metrics(*, failed=0, visible_outputs=8, p95=420, cost=12.5, malformed=0):
+    return {
+        "cases": {
+            "akshat-singh": {
+                "production": {
+                    "failed": failed,
+                    "passed": 12 - failed,
+                    "malformed_responses": malformed,
+                    "latency_ms": {"p95": p95},
+                    "max_visible_gap_seconds": 1.5,
+                }
+            },
+            "maya-rao": {
+                "staging": {
+                    "failed": 0,
+                    "passed": 8,
+                    "malformed_responses": 0,
+                    "latency_ms": {"p95": 360},
+                    "max_visible_gap_seconds": 0.8,
+                }
+            },
+        },
+        "visible_outputs": visible_outputs,
+        "total_cost_cents": cost,
+    }
+
+
+def test_json_eval_checks_select_nested_metrics(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_metrics_project(tmp_path, sample_metrics())
+    (tmp_path / "eval_cases" / "metrics.yaml").write_text(
+        """
+version: 1
+target: metrics
+cases:
+  - name: no malformed responses anywhere
+    output: metrics
+    json_path: $.cases.*.*.malformed_responses
+    equals: 0
+  - name: akshat production did not fail
+    output: metrics
+    path: $.cases.akshat-singh.production.failed
+    equals: 0
+  - name: p95 latency stays under threshold
+    output: metrics
+    json_path: $.cases.*.*.latency_ms.p95
+    max: 500
+  - name: enough visible outputs
+    output: metrics
+    json_path: $.visible_outputs
+    min: 5
+  - name: selected JSON text checks
+    output: metrics
+    json_path: $.cases.akshat-singh.production
+    contains: latency_ms
+    not_contains: catastrophic
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["run", "metrics"]) == 0
+    result = evaluate_target(ProjectConfig.load(tmp_path), "metrics")
+    assert result is not None
+    assert result.failed == 0
+    assert main(["eval", "metrics"]) == 0
+
+    (tmp_path / "eval_cases" / "metrics.yaml").write_text(
+        """
+version: 1
+target: metrics
+cases:
+  - name: p95 latency catches regression
+    output: metrics
+    json_path: $.cases.*.*.latency_ms.p95
+    max: 400
+""".lstrip(),
+        encoding="utf-8",
+    )
+    failed = evaluate_target(ProjectConfig.load(tmp_path), "metrics")
+    assert failed is not None
+    assert failed.failed == 1
+    assert "above maximum" in failed.results[0].reason
+    assert "$.cases.akshat-singh.production.latency_ms.p95" in failed.results[0].reason
+
+
+def test_compare_reports_json_metric_deltas(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_metrics_project(tmp_path, sample_metrics())
+
+    assert main(["run", "metrics"]) == 0
+    assert main(["approve", "metrics"]) == 0
+    baseline = ProjectState(tmp_path).latest_manifest_for_target("metrics")
+    assert baseline is not None
+
+    changed = sample_metrics(failed=2, visible_outputs=11, p95=735, cost=18.75, malformed=1)
+    (tmp_path / "context" / "metrics.json").write_text(json.dumps(changed, indent=2, sort_keys=True), encoding="utf-8")
+    assert main(["run", "metrics"]) == 0
+
+    compare_text = compare_to_baseline(ProjectConfig.load(tmp_path), "metrics", with_evals=False)
+    assert "## Metric Deltas" in compare_text
+    assert "| metrics | `$.cases.akshat-singh.production.failed` | 0 | 2 | +2 |" in compare_text
+    assert "| metrics | `$.cases.akshat-singh.production.malformed_responses` | 0 | 1 | +1 |" in compare_text
+    assert "| metrics | `$.cases.akshat-singh.production.latency_ms.p95` | 420 | 735 | +315 |" in compare_text
+    assert "| metrics | `$.visible_outputs` | 8 | 11 | +3 |" in compare_text
+    assert "| metrics | `$.total_cost_cents` | 12.5 | 18.75 | +6.25 |" in compare_text
+
+
 def test_approval_records_do_not_overwrite_with_same_timestamp(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert main(["init"]) == 0
