@@ -171,6 +171,7 @@ The target graph is `extract -> synthesize -> critique`, with `default_group: up
 The demo also includes eval cases for `critique`, so you can run `lmake eval critique`, `lmake approve critique`, edit context, run again, and use `lmake compare critique`.
 
 See [docs/recipes.md](docs/recipes.md) for the first review-loop recipes, including an opt-in Haiku integration proof.
+See [docs/behavioral-regression.md](docs/behavioral-regression.md) for the emerging case/suite/label pattern for AI behavior regression workflows.
 
 ## Published demo
 
@@ -304,9 +305,9 @@ cases:
     output: metrics
     json_path: $.cases.*.*.malformed_responses
     equals: 0
-  - name: Akshat production did not fail
+  - name: promoted candidate did not fail
     output: metrics
-    path: $.cases.akshat-singh.production.failed
+    json_path: $.cases.case-001.candidate.failed
     equals: 0
   - name: p95 latency stays under threshold
     output: metrics
