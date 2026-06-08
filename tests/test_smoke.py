@@ -245,6 +245,23 @@ def test_compare_reports_json_metric_deltas(tmp_path, monkeypatch):
     assert "| metrics | `$.total_cost_cents` | 12.5 | 18.75 | +6.25 |" in compare_text
 
 
+def test_compare_omits_metric_deltas_when_json_metrics_unchanged(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_metrics_project(tmp_path, sample_metrics())
+
+    assert main(["run", "metrics"]) == 0
+    assert main(["approve", "metrics"]) == 0
+    assert main(["run", "metrics"]) == 0
+
+    latest = ProjectState(tmp_path).latest_manifest_for_target("metrics")
+    assert latest is not None
+    assert latest["mode"] == "reuse"
+
+    compare_text = compare_to_baseline(ProjectConfig.load(tmp_path), "metrics", with_evals=False)
+    assert "outputs:      unchanged" in compare_text
+    assert "## Metric Deltas" not in compare_text
+
+
 def test_approval_records_do_not_overwrite_with_same_timestamp(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert main(["init"]) == 0
