@@ -60,6 +60,7 @@
 ## v0.5: collaboration and sharing
 
 - [x] realistic local demo project with extract/synthesize/critique workflow
+- [x] scripted regression demo: prompt edit -> status -> run -> eval failure -> compare -> approve -> publish
 - [x] first review-loop recipe docs
 - [x] local web UI MVP
 - [x] context-only document editor
@@ -90,6 +91,7 @@
 
 - [x] document replayable case, label, suite, metric, fresh-replay, and history-dashboard conventions
 - [x] document the local `run -> eval -> compare -> approve` behavior review loop
+- [x] deterministic prompt-regression demo showing eval/compare/approval trail
 - [ ] sanitized behavioral-regression example project with no domain-specific data
 - [ ] scaffold command or template for `cases/`, `labels/`, `suites/`, and review targets
 - [ ] first-class suite selection ergonomics for smoke/regression/archive workflows

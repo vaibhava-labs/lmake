@@ -26,9 +26,9 @@ classifiers = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/vaibhava-enzo/lmake"
-Repository = "https://github.com/vaibhava-enzo/lmake"
-Issues = "https://github.com/vaibhava-enzo/lmake/issues"
+Homepage = "https://github.com/vaibhava-labs/lmake"
+Repository = "https://github.com/vaibhava-labs/lmake"
+Issues = "https://github.com/vaibhava-labs/lmake/issues"
 
 [project.optional-dependencies]
 litellm = ["litellm>=1.0"]

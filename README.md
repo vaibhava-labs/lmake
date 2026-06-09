@@ -43,19 +43,19 @@ The CLI command is `lmake`. The Python distribution name is `lmake-ai` because `
 For collaborators with GitHub SSH access:
 
 ```bash
-pipx install "git+ssh://git@github.com/vaibhava-enzo/lmake.git"
+pipx install "git+ssh://git@github.com/vaibhava-labs/lmake.git"
 ```
 
 Or with `pip`:
 
 ```bash
-python -m pip install "git+ssh://git@github.com/vaibhava-enzo/lmake.git"
+python -m pip install "git+ssh://git@github.com/vaibhava-labs/lmake.git"
 ```
 
 For the web UI from Git:
 
 ```bash
-python -m pip install "lmake-ai[web] @ git+ssh://git@github.com/vaibhava-enzo/lmake.git"
+python -m pip install "lmake-ai[web] @ git+ssh://git@github.com/vaibhava-labs/lmake.git"
 ```
 
 For local development from this checkout:
@@ -170,6 +170,8 @@ It uses four source documents in `context/` and produces:
 The target graph is `extract -> synthesize -> critique`, with `default_group: update` so both the CLI and web UI can use one Update action.
 The demo also includes eval cases for `critique`, so you can run `lmake eval critique`, `lmake approve critique`, edit context, run again, and use `lmake compare critique`.
 
+For a tighter regression story, run `bash demo_project/scripts/killer_demo.sh` or follow [docs/killer-demo.md](docs/killer-demo.md). It shows a prompt edit dropping traceability, `lmake eval` catching it, `lmake compare` explaining the delta against the approved baseline, and `lmake publish` producing the reviewed bundle.
+
 See [docs/recipes.md](docs/recipes.md) for the first review-loop recipes, including an opt-in Haiku integration proof.
 See [docs/behavioral-regression.md](docs/behavioral-regression.md) for the emerging case/suite/label pattern for AI behavior regression workflows.
 
@@ -178,7 +180,7 @@ See [docs/behavioral-regression.md](docs/behavioral-regression.md) for the emerg
 The demo workflow builds a static report bundle on every push to `main` and uploads it as a workflow artifact. When the repository is public or otherwise Pages-capable, the same workflow deploys it to GitHub Pages:
 
 ```text
-https://vaibhava-enzo.github.io/lmake/
+https://vaibhava-labs.github.io/lmake/
 ```
 
 That static bundle is generated from `demo_project`, includes rendered artifacts, `manifest.json`, and `review.json` with baseline/eval provenance.

@@ -23,6 +23,16 @@ lmake serve
 The default group is `update`, which runs the terminal `critique` target and all of its dependencies.
 After approving a baseline, edit a context file, run `lmake run`, and use `lmake compare critique` to see what changed against the approved run.
 
+## Prompt regression demo
+
+Run the 90-second regression flow from the repo root:
+
+```bash
+bash demo_project/scripts/killer_demo.sh
+```
+
+It approves a safe baseline, swaps in a concise prompt that drops risk and traceability sections, shows `lmake eval critique` catching the regression, shows `lmake compare critique` against the baseline, then restores the safe prompt, approves, and publishes.
+
 ## Real Haiku run
 
 The default demo uses deterministic local hooks. To try the same workflow with a real low-cost Anthropic model:

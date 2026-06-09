@@ -9,6 +9,10 @@ cases:
     output: critique
     required_headings:
       - Evidence Gaps
+  - name: critique names risks
+    output: critique
+    required_headings:
+      - Risks
   - name: critique includes follow-up data plan
     output: critique
     required_headings:
@@ -16,6 +20,12 @@ cases:
   - name: critique checks traceability
     output: critique
     contains: Traceability Check
+  - name: critique keeps source accounting
+    output: critique
+    contains:
+      - Claims artifact length
+      - Synthesis artifact length
+      - Source documents inspected
   - name: critique stays readable
     output: critique
     max_words: 700

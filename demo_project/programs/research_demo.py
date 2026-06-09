@@ -5,6 +5,7 @@ from dataclasses import dataclass
 
 
 MARKERS = ("Signal", "Evidence", "Metric", "Concern", "Quote", "Open question")
+REGRESSION_DEMO_MARKER = "DEMO_REGRESSION_MODE: lean_without_traceability"
 
 
 @dataclass(frozen=True)
@@ -122,7 +123,22 @@ Run the demo with a real LiteLLM model on a richer source set and compare two pu
     return {"synthesis": content}
 
 
-def run_critique(inputs):
+def run_critique(inputs, prompt_text=""):
+    if REGRESSION_DEMO_MARKER in prompt_text:
+        content = """# Executive Recommendation
+
+The brief is strong enough to share. It clearly explains that local-first LLM workflows should center source files, generated artifacts, and a publishable report.
+
+## Ship Decision
+
+Move forward with the current positioning and keep the demo concise. The product story is easy to understand and the report is readable.
+
+## Follow-Up
+
+Polish the web UI and prepare a public demo page.
+"""
+        return {"critique": content}
+
     claims = artifact_text(inputs, "claims.md")
     synthesis = artifact_text(inputs, "synthesis.md")
     findings = extract_findings(inputs)
