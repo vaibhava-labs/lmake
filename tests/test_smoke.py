@@ -100,6 +100,46 @@ cases:
     assert main(["approve", "report", "--skip-evals"]) == 0
 
 
+def test_eval_rejects_unknown_text_check_key(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert main(["init"]) == 0
+    (tmp_path / "eval_cases" / "report.yaml").write_text(
+        """
+version: 1
+target: report
+cases:
+  - name: misspelled word count
+    output: report
+    min_wordz: 10
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["run"]) == 0
+    with pytest.raises(ConfigError, match="unknown field\\(s\\): min_wordz"):
+        evaluate_target(ProjectConfig.load(tmp_path), "report")
+
+
+def test_eval_rejects_empty_text_string_check(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert main(["init"]) == 0
+    (tmp_path / "eval_cases" / "report.yaml").write_text(
+        """
+version: 1
+target: report
+cases:
+  - name: empty regex
+    output: report
+    regex: []
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["run"]) == 0
+    with pytest.raises(ConfigError, match="empty regex.regex must include at least one string"):
+        evaluate_target(ProjectConfig.load(tmp_path), "report")
+
+
 def write_metrics_project(tmp_path, metrics):
     (tmp_path / "context").mkdir()
     (tmp_path / "programs").mkdir()
@@ -160,6 +200,13 @@ def sample_metrics(*, failed=0, visible_outputs=8, p95=420, cost=12.5, malformed
                 }
             },
         },
+        "metadata": {
+            "audited": True,
+            "release": "alpha",
+            "retired_at": None,
+        },
+        "summary_text": f"{visible_outputs} visible outputs across two cases",
+        "tags": ["traceable", "approved", "stable"],
         "visible_outputs": visible_outputs,
         "total_cost_cents": cost,
     }
@@ -194,6 +241,40 @@ cases:
     json_path: $.cases.akshat-singh.production
     contains: latency_ms
     not_contains: catastrophic
+  - name: summary exists and has expected shape
+    output: metrics
+    json_path: $.summary_text
+    exists: true
+    type: string
+    regex: '^\\d+ visible outputs'
+    length_min: 20
+    length_max: 80
+  - name: optional field is absent
+    output: metrics
+    json_path: $.metadata.deleted_at
+    exists: false
+  - name: tags are bounded strings
+    output: metrics
+    json_path: $.tags.*
+    type: string
+    regex: '^[a-z]+$'
+    length_min: 5
+    length_max: 10
+  - name: tag array has expected size
+    output: metrics
+    json_path: $.tags
+    type: array
+    length_min: 2
+    length_max: 5
+  - name: metadata types are explicit
+    output: metrics
+    json_path: $.metadata.audited
+    type: boolean
+    equals: true
+  - name: null metadata is explicit
+    output: metrics
+    json_path: $.metadata.retired_at
+    type: null
 """.lstrip(),
         encoding="utf-8",
     )
@@ -221,6 +302,140 @@ cases:
     assert failed.failed == 1
     assert "above maximum" in failed.results[0].reason
     assert "$.cases.akshat-singh.production.latency_ms.p95" in failed.results[0].reason
+
+
+def test_json_eval_reports_structured_check_failures(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_metrics_project(tmp_path, sample_metrics())
+    (tmp_path / "eval_cases" / "metrics.yaml").write_text(
+        """
+version: 1
+target: metrics
+cases:
+  - name: required field is present
+    output: metrics
+    json_path: $.metadata.owner
+    exists: true
+  - name: retired flag is absent
+    output: metrics
+    json_path: $.metadata.retired_at
+    exists: false
+  - name: audited is string
+    output: metrics
+    json_path: $.metadata.audited
+    type: string
+  - name: summary has release marker
+    output: metrics
+    json_path: $.summary_text
+    regex: 'release-ready'
+  - name: tags have at least four entries
+    output: metrics
+    json_path: $.tags
+    length_min: 4
+  - name: visible output has a length
+    output: metrics
+    json_path: $.visible_outputs
+    length_min: 1
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["run", "metrics"]) == 0
+    failed = evaluate_target(ProjectConfig.load(tmp_path), "metrics")
+    assert failed is not None
+    assert failed.failed == 6
+    reasons = [result.reason for result in failed.results]
+    assert "matched no values" in reasons[0]
+    assert "unexpectedly matched 1 value(s)" in reasons[1]
+    assert "type 'boolean' != expected 'string'" in reasons[2]
+    assert "regex did not match" in reasons[3]
+    assert "length 3 is below minimum 4" in reasons[4]
+    assert "has no length" in reasons[5]
+
+
+def test_json_eval_rejects_non_boolean_exists(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_metrics_project(tmp_path, sample_metrics())
+    (tmp_path / "eval_cases" / "metrics.yaml").write_text(
+        """
+version: 1
+target: metrics
+cases:
+  - name: malformed exists
+    output: metrics
+    json_path: $.metadata.owner
+    exists: null
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["run", "metrics"]) == 0
+    with pytest.raises(ConfigError, match="exists must be a boolean"):
+        evaluate_target(ProjectConfig.load(tmp_path), "metrics")
+
+
+def test_json_eval_rejects_unknown_json_check_key(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_metrics_project(tmp_path, sample_metrics())
+    (tmp_path / "eval_cases" / "metrics.yaml").write_text(
+        """
+version: 1
+target: metrics
+cases:
+  - name: misspelled length check
+    output: metrics
+    json_path: $.tags
+    lenght_min: 2
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["run", "metrics"]) == 0
+    with pytest.raises(ConfigError, match="unknown field\\(s\\): lenght_min"):
+        evaluate_target(ProjectConfig.load(tmp_path), "metrics")
+
+
+def test_json_eval_rejects_empty_string_check(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_metrics_project(tmp_path, sample_metrics())
+    (tmp_path / "eval_cases" / "metrics.yaml").write_text(
+        """
+version: 1
+target: metrics
+cases:
+  - name: empty selected regex
+    output: metrics
+    json_path: $.summary_text
+    regex: []
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["run", "metrics"]) == 0
+    with pytest.raises(ConfigError, match="empty selected regex.regex must include at least one string"):
+        evaluate_target(ProjectConfig.load(tmp_path), "metrics")
+
+
+def test_json_eval_rejects_contradictory_absence_check(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_metrics_project(tmp_path, sample_metrics())
+    (tmp_path / "eval_cases" / "metrics.yaml").write_text(
+        """
+version: 1
+target: metrics
+cases:
+  - name: absent field cannot also have shape
+    output: metrics
+    json_path: $.metadata.deleted_at
+    exists: false
+    type: string
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["run", "metrics"]) == 0
+    with pytest.raises(ConfigError, match="exists: false with incompatible check\\(s\\): type"):
+        evaluate_target(ProjectConfig.load(tmp_path), "metrics")
 
 
 def test_compare_reports_json_metric_deltas(tmp_path, monkeypatch):

@@ -156,8 +156,11 @@ Eval cases are deterministic checks against artifact bytes restored from the con
 - `required_headings`
 - `min_words` / `max_words`
 - `min_bytes` / `max_bytes`
-- JSON selectors with root `$`, object keys, and `*` wildcards
-- JSON value checks: `equals`, `min`, `max`, `contains`, `not_contains`
+- JSON selectors with root `$`, object keys, array indexes, and `*` wildcards
+- JSON value checks: `exists`, `type`, `equals`, `min`, `max`, `contains`, `not_contains`, `regex`, `length_min`, `length_max`
+
+A JSON eval case fails when its selector matches no values unless it declares
+`exists: false`, which is the explicit absence assertion.
 
 Example JSON metric eval:
 
@@ -167,6 +170,11 @@ cases:
     output: metrics
     json_path: $.cases.*.*.latency_ms.p95
     max: 800
+  - name: citations are present
+    output: metrics
+    json_path: $.citations
+    type: array
+    length_min: 2
 ```
 
 Approved baselines live at:

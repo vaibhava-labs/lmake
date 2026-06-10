@@ -151,6 +151,98 @@ def json_value_text(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, sort_keys=True)
 
 
+CASE_META_KEYS = {"name", "output", "json_path", "path"}
+
+TEXT_CHECK_KEYS = {
+    "contains",
+    "max_bytes",
+    "max_words",
+    "min_bytes",
+    "min_words",
+    "not_contains",
+    "regex",
+    "required_headings",
+}
+
+JSON_CHECK_KEYS = {
+    "contains",
+    "equals",
+    "exists",
+    "length_max",
+    "length_min",
+    "max",
+    "min",
+    "not_contains",
+    "regex",
+    "type",
+}
+
+JSON_TYPES = {"string", "number", "boolean", "array", "object", "null"}
+TEXT_STRING_CHECK_KEYS = {"contains", "not_contains", "regex", "required_headings"}
+JSON_STRING_CHECK_KEYS = {"contains", "not_contains", "regex"}
+
+
+def json_type(value: Any) -> str:
+    if value is None:
+        return "null"
+    if isinstance(value, bool):
+        return "boolean"
+    if isinstance(value, (int, float)):
+        return "number"
+    if isinstance(value, str):
+        return "string"
+    if isinstance(value, list):
+        return "array"
+    if isinstance(value, dict):
+        return "object"
+    return type(value).__name__
+
+
+def json_length(value: Any) -> int | None:
+    if isinstance(value, (str, list)):
+        return len(value)
+    return None
+
+
+def normalize_json_type(value: Any, case_name: str) -> str:
+    expected_type = "null" if value is None else value
+    if not isinstance(expected_type, str) or expected_type not in JSON_TYPES:
+        supported = ", ".join(sorted(JSON_TYPES))
+        raise ConfigError(f"{case_name}.type must be one of: {supported}.")
+    return expected_type
+
+
+def validate_eval_case(case: dict[str, Any], field_name: str) -> None:
+    selector = json_path_for_case(case)
+    is_json_case = selector is not None
+    allowed_keys = CASE_META_KEYS | (JSON_CHECK_KEYS if is_json_case else TEXT_CHECK_KEYS)
+    unknown = sorted(set(case) - allowed_keys)
+    if unknown:
+        raise ConfigError(f"{field_name} has unknown field(s): {', '.join(unknown)}")
+
+    case_name = str(case.get("name"))
+    string_check_keys = JSON_STRING_CHECK_KEYS if is_json_case else TEXT_STRING_CHECK_KEYS
+    for key in sorted(set(case) & string_check_keys):
+        values = as_strings(case.get(key), f"{case_name}.{key}")
+        if not values:
+            raise ConfigError(f"{case_name}.{key} must include at least one string.")
+
+    if selector is None:
+        return
+
+    parse_json_path(selector)
+    if "exists" in case:
+        exists = case.get("exists")
+        if not isinstance(exists, bool):
+            raise ConfigError(f"{case_name}.exists must be a boolean.")
+        other_checks = (set(case) & JSON_CHECK_KEYS) - {"exists"}
+        if exists is False and other_checks:
+            names = ", ".join(sorted(other_checks))
+            raise ConfigError(f"{case_name} has exists: false with incompatible check(s): {names}")
+    if "type" in case:
+        normalize_json_type(case.get("type"), case_name)
+
+
 def evaluate_json_case(text: str, case: dict[str, Any], selector: str) -> tuple[bool, str]:
     try:
         payload = json.loads(text)
@@ -158,11 +250,36 @@ def evaluate_json_case(text: str, case: dict[str, Any], selector: str) -> tuple[
         return False, f"output is not valid JSON: {exc.msg}"
 
     matches = select_json_path(payload, selector)
+    checks = 0
+
+    if "exists" in case:
+        exists = case.get("exists")
+        if not isinstance(exists, bool):
+            raise ConfigError(f"{case.get('name')}.exists must be a boolean.")
+        checks += 1
+        if exists and not matches:
+            return False, f"json_path {selector!r} matched no values"
+        if not exists:
+            if matches:
+                return False, f"json_path {selector!r} unexpectedly matched {len(matches)} value(s)"
+            other_checks = (set(case) & JSON_CHECK_KEYS) - {"exists"}
+            if other_checks:
+                names = ", ".join(sorted(other_checks))
+                return False, f"json_path {selector!r} matched no values for additional check(s): {names}"
+            return True, "0 selected JSON value(s), 1 check(s) passed"
+
     if not matches:
         return False, f"json_path {selector!r} matched no values"
 
-    checks = 0
     selected_text = "\n".join(json_value_text(value) for _, value in matches)
+
+    if "type" in case:
+        checks += 1
+        expected_type = normalize_json_type(case.get("type"), str(case.get("name")))
+        for path, value in matches:
+            actual_type = json_type(value)
+            if actual_type != expected_type:
+                return False, f"{path} type {actual_type!r} != expected {expected_type!r}"
 
     if "equals" in case:
         checks += 1
@@ -206,6 +323,36 @@ def evaluate_json_case(text: str, case: dict[str, Any], selector: str) -> tuple[
     if present:
         return False, "forbidden text present in selected JSON values: " + ", ".join(repr(item) for item in present)
 
+    regexes = as_strings(case.get("regex"), f"{case.get('name')}.regex")
+    if case.get("regex") is not None:
+        checks += 1
+    for path, value in matches:
+        if regexes and not isinstance(value, str):
+            return False, f"{path} value {value!r} is not a string"
+        for pattern in regexes:
+            if re.search(pattern, value, flags=re.MULTILINE) is None:
+                return False, f"{path} regex did not match: {pattern!r}"
+
+    length_min = as_int(case.get("length_min"), f"{case.get('name')}.length_min")
+    if length_min is not None:
+        checks += 1
+        for path, value in matches:
+            length = json_length(value)
+            if length is None:
+                return False, f"{path} value {value!r} has no length"
+            if length < length_min:
+                return False, f"{path} length {length} is below minimum {length_min}"
+
+    length_max = as_int(case.get("length_max"), f"{case.get('name')}.length_max")
+    if length_max is not None:
+        checks += 1
+        for path, value in matches:
+            length = json_length(value)
+            if length is None:
+                return False, f"{path} value {value!r} has no length"
+            if length > length_max:
+                return False, f"{path} length {length} is above maximum {length_max}"
+
     if checks == 0:
         raise ConfigError(f"eval case {case.get('name')!r} does not define any JSON checks.")
     return True, f"{len(matches)} selected JSON value(s), {checks} check(s) passed"
@@ -234,6 +381,7 @@ def load_eval_suite(config: ProjectConfig, target: str, suite_path: Path | None 
             raise ConfigError(f"eval case {index} in {path} must be a mapping.")
         if not isinstance(case.get("name"), str) or not case.get("name"):
             raise ConfigError(f"eval case {index} in {path} must have a non-empty name.")
+        validate_eval_case(case, f"eval case {case.get('name')!r} in {path}")
     data["_path"] = path
     return data
 

@@ -299,7 +299,7 @@ cases:
 
 Supported text checks are `contains`, `not_contains`, `regex`, `required_headings`, `min_words`, `max_words`, `min_bytes`, and `max_bytes`.
 
-JSON outputs can be checked with a small selector syntax: root `$`, object keys, and `*` wildcards. JSON eval checks support `equals`, `min`, `max`, `contains`, and `not_contains`.
+JSON outputs can be checked with a small selector syntax: root `$`, object keys, array indexes, and `*` wildcards. JSON eval checks support `exists`, `type`, `equals`, `min`, `max`, `contains`, `not_contains`, `regex`, `length_min`, and `length_max`. A missing JSON path fails by default; use `exists: false` when absence is the expected behavior.
 
 ```yaml
 cases:
@@ -315,6 +315,18 @@ cases:
     output: metrics
     json_path: $.cases.*.*.latency_ms.p95
     max: 800
+  - name: summary shape is stable
+    output: metrics
+    json_path: $.summary.text
+    exists: true
+    type: string
+    regex: '^\d+ recommendations'
+    length_max: 120
+  - name: citations are present
+    output: metrics
+    json_path: $.citations
+    type: array
+    length_min: 2
 ```
 
 ```bash

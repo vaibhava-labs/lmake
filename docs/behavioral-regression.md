@@ -125,6 +125,13 @@ cases:
     output: moment_score
     json_path: $.cases.case-002.candidate.failed
     equals: 0
+
+  - name: fresh replay emitted citations
+    output: metrics
+    json_path: $.cases.case-002.candidate.citations
+    exists: true
+    type: array
+    length_min: 2
 ```
 
 ## Workflow Commands

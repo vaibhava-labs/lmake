@@ -39,6 +39,7 @@
 - [x] `lmake compare` against approved baseline
 - [x] opt-in real Haiku integration test for prompt iteration review loop
 - [x] JSON metric eval checks over structured artifacts
+- [x] JSON eval checks for presence, type, regex, and array/string length
 - [x] numeric JSON metric deltas in `lmake compare`
 - [ ] structured output schemas
 - [ ] full JSON artifact diff
