@@ -84,7 +84,7 @@
 - [ ] remote cache spec
 - [x] GitHub Action
 - [x] static HTML run browser via GitHub Pages demo
-- [ ] PR comment summaries
+- [x] PR comment summaries
 - [ ] optional hosted artifact viewer
 - [ ] PyPI/TestPyPI release under the non-conflicting `lmake-ai` distribution name
 
