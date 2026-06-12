@@ -140,6 +140,43 @@ cases:
         evaluate_target(ProjectConfig.load(tmp_path), "report")
 
 
+def test_eval_rejects_invalid_text_numeric_check_at_load(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert main(["init"]) == 0
+    (tmp_path / "eval_cases" / "report.yaml").write_text(
+        """
+version: 1
+target: report
+cases:
+  - name: malformed word threshold
+    output: report
+    min_words: many
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="malformed word threshold.min_words must be an integer"):
+        evaluate_target(ProjectConfig.load(tmp_path), "report")
+
+
+def test_eval_rejects_text_case_without_checks_at_load(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert main(["init"]) == 0
+    (tmp_path / "eval_cases" / "report.yaml").write_text(
+        """
+version: 1
+target: report
+cases:
+  - name: no text checks
+    output: report
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="eval case 'no text checks' does not define any checks"):
+        evaluate_target(ProjectConfig.load(tmp_path), "report")
+
+
 def write_metrics_project(tmp_path, metrics):
     (tmp_path / "context").mkdir()
     (tmp_path / "programs").mkdir()
@@ -436,6 +473,88 @@ cases:
     assert main(["run", "metrics"]) == 0
     with pytest.raises(ConfigError, match="exists: false with incompatible check\\(s\\): type"):
         evaluate_target(ProjectConfig.load(tmp_path), "metrics")
+
+
+def test_json_eval_rejects_invalid_numeric_check_at_load(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_metrics_project(tmp_path, sample_metrics())
+    (tmp_path / "eval_cases" / "metrics.yaml").write_text(
+        """
+version: 1
+target: metrics
+cases:
+  - name: malformed length threshold
+    output: metrics
+    json_path: $.tags
+    length_min: five
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="malformed length threshold.length_min must be an integer"):
+        evaluate_target(ProjectConfig.load(tmp_path), "metrics")
+
+
+def test_json_eval_rejects_null_numeric_check_at_load(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_metrics_project(tmp_path, sample_metrics())
+    (tmp_path / "eval_cases" / "metrics.yaml").write_text(
+        """
+version: 1
+target: metrics
+cases:
+  - name: null numeric max
+    output: metrics
+    json_path: $.visible_outputs
+    max:
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="null numeric max.max must be a number"):
+        evaluate_target(ProjectConfig.load(tmp_path), "metrics")
+
+
+def test_json_eval_rejects_case_without_checks_at_load(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_metrics_project(tmp_path, sample_metrics())
+    (tmp_path / "eval_cases" / "metrics.yaml").write_text(
+        """
+version: 1
+target: metrics
+cases:
+  - name: no JSON checks
+    output: metrics
+    json_path: $.summary_text
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="eval case 'no JSON checks' does not define any JSON checks"):
+        evaluate_target(ProjectConfig.load(tmp_path), "metrics")
+
+
+def test_json_eval_allows_exists_true_as_only_check(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_metrics_project(tmp_path, sample_metrics())
+    (tmp_path / "eval_cases" / "metrics.yaml").write_text(
+        """
+version: 1
+target: metrics
+cases:
+  - name: summary exists
+    output: metrics
+    json_path: $.summary_text
+    exists: true
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["run", "metrics"]) == 0
+    result = evaluate_target(ProjectConfig.load(tmp_path), "metrics")
+    assert result is not None
+    assert result.failed == 0
+    assert result.results[0].reason == "1 selected JSON value(s), 1 check(s) passed"
 
 
 def test_compare_reports_json_metric_deltas(tmp_path, monkeypatch):
