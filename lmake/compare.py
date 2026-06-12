@@ -1,13 +1,14 @@
 from __future__ import annotations
 
 import json
+from dataclasses import dataclass
 from typing import Any
 
 from .baseline import load_baseline, latest_manifest
 from .config import ProjectConfig
 from .engine import diff_runs
 from .errors import ConfigError, RunNotFoundError
-from .evals import evaluate_target, text_from_output
+from .evals import EvalSuiteResult, evaluate_target, text_from_output
 from .state import ProjectState
 
 
@@ -26,6 +27,26 @@ INTERESTING_METRIC_FRAGMENTS = (
     ".cost.",
     ".cost_",
 )
+
+GITHUB_DIFF_LINE_LIMIT = 300
+
+
+@dataclass(frozen=True)
+class CompareResult:
+    target: str
+    baseline_run: str
+    latest_run: str
+    same_fingerprint: bool
+    changed_outputs: list[str]
+    execution_changes: list[str]
+    metric_rows: list[dict[str, str]]
+    baseline_eval: EvalSuiteResult | None
+    latest_eval: EvalSuiteResult | None
+    diff_text: str
+
+    @property
+    def latest_evals_failed(self) -> bool:
+        return self.latest_eval is not None and self.latest_eval.failed > 0
 
 
 def output_hashes(manifest: dict[str, Any]) -> dict[str, str]:
@@ -123,12 +144,11 @@ def metric_delta_rows(state: ProjectState, baseline: dict[str, Any], latest: dic
     return rows
 
 
-def metric_delta_section(state: ProjectState, baseline: dict[str, Any], latest: dict[str, Any]) -> list[str]:
-    rows = metric_delta_rows(state, baseline, latest)
+def metric_delta_section_from_rows(rows: list[dict[str, str]], *, heading: str = "## Metric Deltas") -> list[str]:
     if not rows:
         return []
     chunks = [
-        "\n## Metric Deltas\n",
+        f"\n{heading}\n",
         "| output | path | baseline | latest | delta |\n",
         "|---|---|---:|---:|---:|\n",
     ]
@@ -137,9 +157,17 @@ def metric_delta_section(state: ProjectState, baseline: dict[str, Any], latest: 
     return chunks
 
 
-def eval_section(config: ProjectConfig, target: str, baseline_run: str, latest_run: str) -> list[str]:
+def metric_delta_section(state: ProjectState, baseline: dict[str, Any], latest: dict[str, Any]) -> list[str]:
+    return metric_delta_section_from_rows(metric_delta_rows(state, baseline, latest))
+
+
+def eval_results(config: ProjectConfig, target: str, baseline_run: str, latest_run: str) -> tuple[EvalSuiteResult | None, EvalSuiteResult | None]:
     baseline_eval = evaluate_target(config, target, run_id=baseline_run)
     latest_eval = evaluate_target(config, target, run_id=latest_run)
+    return baseline_eval, latest_eval
+
+
+def text_eval_section(baseline_eval: EvalSuiteResult | None, latest_eval: EvalSuiteResult | None) -> list[str]:
     if baseline_eval is None and latest_eval is None:
         return ["\n## Evals\n(no eval_cases suite found)\n"]
     chunks = ["\n## Evals\n"]
@@ -153,7 +181,26 @@ def eval_section(config: ProjectConfig, target: str, baseline_run: str, latest_r
     return chunks
 
 
-def compare_to_baseline(config: ProjectConfig, target: str, *, with_evals: bool = True) -> str:
+def eval_section(config: ProjectConfig, target: str, baseline_run: str, latest_run: str) -> list[str]:
+    baseline_eval, latest_eval = eval_results(config, target, baseline_run, latest_run)
+    return text_eval_section(baseline_eval, latest_eval)
+
+
+def github_eval_section(baseline_eval: EvalSuiteResult | None, latest_eval: EvalSuiteResult | None) -> list[str]:
+    if baseline_eval is None and latest_eval is None:
+        return ["\n### Evals\n(no eval_cases suite found)\n"]
+    chunks = ["\n### Evals\n"]
+    if baseline_eval is not None:
+        chunks.append(f"baseline: {baseline_eval.passed} passed, {baseline_eval.failed} failed\n")
+    if latest_eval is not None:
+        chunks.append(f"latest:   {latest_eval.passed} passed, {latest_eval.failed} failed\n")
+        for result in latest_eval.results:
+            marker = "✅" if result.status == "pass" else "❌"
+            chunks.append(f"- {marker} {result.name}: {result.reason}\n")
+    return chunks
+
+
+def collect_compare_result(config: ProjectConfig, target: str, *, with_evals: bool = True) -> CompareResult:
     config.target(target)
     baseline = load_baseline(config.root, target)
     if baseline is None:
@@ -175,21 +222,107 @@ def compare_to_baseline(config: ProjectConfig, target: str, *, with_evals: bool 
     }
     right_exec = execution_record(latest)
 
+    execution_changes = changed_execution(left_exec, {key: right_exec.get(key) for key in left_exec})
+    baseline_eval = None
+    latest_eval = None
+    if with_evals:
+        baseline_eval, latest_eval = eval_results(config, target, baseline_run, latest_run)
+    return CompareResult(
+        target=target,
+        baseline_run=baseline_run,
+        latest_run=latest_run,
+        same_fingerprint=same_fingerprint,
+        changed_outputs=changed_outputs,
+        execution_changes=execution_changes,
+        metric_rows=metric_delta_rows(state, baseline, latest),
+        baseline_eval=baseline_eval,
+        latest_eval=latest_eval,
+        diff_text=diff_runs(config, baseline_run, latest_run),
+    )
+
+
+def text_compare(result: CompareResult, *, with_evals: bool = True) -> str:
     chunks = [
         "# lmake compare\n",
-        f"target: {target}\n",
-        f"baseline_run: {baseline_run}\n",
-        f"latest_run:   {latest_run}\n",
-        f"fingerprint:  {'unchanged' if same_fingerprint else 'changed'}\n",
-        f"outputs:      {'unchanged' if not changed_outputs else 'changed ' + ', '.join(changed_outputs)}\n",
+        f"target: {result.target}\n",
+        f"baseline_run: {result.baseline_run}\n",
+        f"latest_run:   {result.latest_run}\n",
+        f"fingerprint:  {'unchanged' if result.same_fingerprint else 'changed'}\n",
+        f"outputs:      {'unchanged' if not result.changed_outputs else 'changed ' + ', '.join(result.changed_outputs)}\n",
     ]
-    execution_changes = changed_execution(left_exec, {key: right_exec.get(key) for key in left_exec})
-    if execution_changes:
+    if result.execution_changes:
         chunks.append("\n## Execution Changes\n")
-        chunks.extend(line + "\n" for line in execution_changes)
-    chunks.extend(metric_delta_section(state, baseline, latest))
+        chunks.extend(line + "\n" for line in result.execution_changes)
+    chunks.extend(metric_delta_section_from_rows(result.metric_rows))
     if with_evals:
-        chunks.extend(eval_section(config, target, baseline_run, latest_run))
+        chunks.extend(text_eval_section(result.baseline_eval, result.latest_eval))
     chunks.append("\n")
-    chunks.append(diff_runs(config, baseline_run, latest_run))
+    chunks.append(result.diff_text)
     return "".join(chunks)
+
+
+def github_status_summary(result: CompareResult, *, with_evals: bool = True) -> str:
+    parts = [
+        f"{'✅' if result.same_fingerprint else '⚠️'} fingerprint {'unchanged' if result.same_fingerprint else 'changed'}",
+    ]
+    if result.changed_outputs:
+        parts.append(f"⚠️ outputs changed: {', '.join(result.changed_outputs)}")
+    else:
+        parts.append("✅ outputs unchanged")
+    if with_evals and result.latest_eval is not None:
+        if result.latest_eval.failed:
+            parts.append(f"⚠️ evals failed: {result.latest_eval.passed} passed, {result.latest_eval.failed} failed")
+        else:
+            parts.append(f"✅ evals passed: {result.latest_eval.passed} passed")
+    return " · ".join(parts)
+
+
+def github_artifact_diff(diff_text: str, *, limit: int = GITHUB_DIFF_LINE_LIMIT) -> str:
+    lines = diff_text.splitlines()
+    if len(lines) > limit:
+        remaining = len(lines) - limit
+        lines = lines[:limit] + [f"... truncated ({remaining} more lines)"]
+    body = "\n".join(lines)
+    if body:
+        body += "\n"
+    return f"<details><summary>artifact diff</summary>\n\n````diff\n{body}````\n\n</details>\n"
+
+
+def github_compare(result: CompareResult, *, with_evals: bool = True) -> str:
+    chunks = [
+        f"<!-- lmake-compare: {result.target} -->\n",
+        f"### lmake compare: {result.target}\n",
+        github_status_summary(result, with_evals=with_evals) + "\n",
+        f"\nbaseline_run: {result.baseline_run}\n",
+        f"latest_run:   {result.latest_run}\n",
+        f"fingerprint:  {'unchanged' if result.same_fingerprint else 'changed'}\n",
+        f"outputs:      {'unchanged' if not result.changed_outputs else 'changed ' + ', '.join(result.changed_outputs)}\n",
+    ]
+    if result.execution_changes:
+        chunks.append("\n### Execution Changes\n")
+        chunks.extend(line + "\n" for line in result.execution_changes)
+    chunks.extend(metric_delta_section_from_rows(result.metric_rows, heading="### Metric Deltas"))
+    if with_evals:
+        chunks.extend(github_eval_section(result.baseline_eval, result.latest_eval))
+    chunks.append("\n")
+    chunks.append(github_artifact_diff(result.diff_text))
+    return "".join(chunks)
+
+
+def render_compare_result(result: CompareResult, *, fmt: str = "text", with_evals: bool = True) -> str:
+    if fmt == "text":
+        return text_compare(result, with_evals=with_evals)
+    if fmt == "github":
+        return github_compare(result, with_evals=with_evals)
+    raise ConfigError("compare format must be one of: github, text.")
+
+
+def compare_exit_code(result: CompareResult) -> int:
+    if result.changed_outputs or result.latest_evals_failed:
+        return 1
+    return 0
+
+
+def compare_to_baseline(config: ProjectConfig, target: str, *, with_evals: bool = True, fmt: str = "text") -> str:
+    result = collect_compare_result(config, target, with_evals=with_evals)
+    return render_compare_result(result, fmt=fmt, with_evals=with_evals)

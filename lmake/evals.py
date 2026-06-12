@@ -180,6 +180,9 @@ JSON_CHECK_KEYS = {
 JSON_TYPES = {"string", "number", "boolean", "array", "object", "null"}
 TEXT_STRING_CHECK_KEYS = {"contains", "not_contains", "regex", "required_headings"}
 JSON_STRING_CHECK_KEYS = {"contains", "not_contains", "regex"}
+TEXT_INT_CHECK_KEYS = {"max_bytes", "max_words", "min_bytes", "min_words"}
+JSON_NUMBER_CHECK_KEYS = {"max", "min"}
+JSON_INT_CHECK_KEYS = {"length_max", "length_min"}
 
 
 def json_type(value: Any) -> str:
@@ -227,10 +230,32 @@ def validate_eval_case(case: dict[str, Any], field_name: str) -> None:
         if not values:
             raise ConfigError(f"{case_name}.{key} must include at least one string.")
 
+    if is_json_case:
+        for key in sorted(set(case) & JSON_NUMBER_CHECK_KEYS):
+            value = case.get(key)
+            if value is None:
+                raise ConfigError(f"{case_name}.{key} must be a number.")
+            as_number(value, f"{case_name}.{key}")
+        for key in sorted(set(case) & JSON_INT_CHECK_KEYS):
+            value = case.get(key)
+            if value is None:
+                raise ConfigError(f"{case_name}.{key} must be an integer.")
+            as_int(value, f"{case_name}.{key}")
+    else:
+        for key in sorted(set(case) & TEXT_INT_CHECK_KEYS):
+            value = case.get(key)
+            if value is None:
+                raise ConfigError(f"{case_name}.{key} must be an integer.")
+            as_int(value, f"{case_name}.{key}")
+
     if selector is None:
+        if not (set(case) & TEXT_CHECK_KEYS):
+            raise ConfigError(f"eval case {case.get('name')!r} does not define any checks.")
         return
 
     parse_json_path(selector)
+    if not (set(case) & JSON_CHECK_KEYS):
+        raise ConfigError(f"eval case {case.get('name')!r} does not define any JSON checks.")
     if "exists" in case:
         exists = case.get("exists")
         if not isinstance(exists, bool):

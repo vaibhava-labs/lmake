@@ -1,0 +1,60 @@
+name: Compare Comment
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build main demo baseline
+        run: |
+          git checkout origin/main
+          python -m pip install -e .
+          cd demo_project
+          python -m lmake run
+          python -m lmake approve critique
+
+      - name: Compare PR head to main baseline
+        run: |
+          git checkout -f ${{ github.event.pull_request.head.sha }}
+          python -m pip install -e .
+          cd demo_project
+          python -m lmake run
+          python -m lmake compare critique --format github > /tmp/comment.md
+
+      # Fork PRs do not get a write-capable token, so keep this same-repo only and tolerant.
+      - name: Post sticky compare comment
+        if: ${{ github.event.pull_request.head.repo.full_name == github.repository }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          marker='<!-- lmake-compare: critique -->'
+          body="$(cat /tmp/comment.md)"
+          comment_id="$(
+            gh api --paginate "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+              --jq ".[] | select(.body | contains(\"$marker\")) | .id" \
+              | head -n 1
+          )"
+          if [ -n "$comment_id" ]; then
+            gh api --method PATCH "repos/${{ github.repository }}/issues/comments/$comment_id" \
+              --field body="$body"
+          else
+            gh api --method POST "repos/${{ github.repository }}/issues/${{ github.event.pull_request.number }}/comments" \
+              --field body="$body"
+          fi

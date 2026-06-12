@@ -8,7 +8,7 @@ from typing import Any
 
 from . import __version__
 from .baseline import approve_latest, baseline_rows, set_baseline
-from .compare import compare_to_baseline
+from .compare import collect_compare_result, compare_exit_code, render_compare_result
 from .config import ProjectConfig, find_project_root
 from .engine import diff_runs, logs, replay_run, run_target, status_all
 from .evals import evaluate_target
@@ -201,7 +201,11 @@ def cmd_baseline_set(args: argparse.Namespace) -> int:
 
 def cmd_compare(args: argparse.Namespace) -> int:
     config = load_config()
-    print(compare_to_baseline(config, args.target, with_evals=not args.no_evals))
+    with_evals = not args.no_evals
+    result = collect_compare_result(config, args.target, with_evals=with_evals)
+    print(render_compare_result(result, fmt=args.format, with_evals=with_evals))
+    if args.exit_code:
+        return compare_exit_code(result)
     return 0
 
 
@@ -332,6 +336,8 @@ def build_parser() -> argparse.ArgumentParser:
     p_compare = sub.add_parser("compare", help="compare latest run for a target against its baseline")
     p_compare.add_argument("target")
     p_compare.add_argument("--no-evals", action="store_true", help="skip eval_cases in the compare report")
+    p_compare.add_argument("--format", choices=["text", "github"], default="text", help="output format")
+    p_compare.add_argument("--exit-code", action="store_true", help="exit 1 when outputs differ or latest evals fail")
     p_compare.set_defaults(func=cmd_compare)
 
     p_eval = sub.add_parser("eval", help="run deterministic eval_cases against a target run")

@@ -5,7 +5,7 @@ import pytest
 
 from lmake.cli import main
 from lmake.baseline import approve_latest, load_baseline
-from lmake.compare import compare_to_baseline
+from lmake.compare import compare_to_baseline, github_artifact_diff
 from lmake.config import ProjectConfig
 from lmake.evals import evaluate_target
 from lmake.engine import collect_outputs, default_outputs, fingerprint_bundle, make_base_manifest, status_all
@@ -137,6 +137,43 @@ cases:
 
     assert main(["run"]) == 0
     with pytest.raises(ConfigError, match="empty regex.regex must include at least one string"):
+        evaluate_target(ProjectConfig.load(tmp_path), "report")
+
+
+def test_eval_rejects_invalid_text_numeric_check_at_load(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert main(["init"]) == 0
+    (tmp_path / "eval_cases" / "report.yaml").write_text(
+        """
+version: 1
+target: report
+cases:
+  - name: malformed word threshold
+    output: report
+    min_words: many
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="malformed word threshold.min_words must be an integer"):
+        evaluate_target(ProjectConfig.load(tmp_path), "report")
+
+
+def test_eval_rejects_text_case_without_checks_at_load(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    assert main(["init"]) == 0
+    (tmp_path / "eval_cases" / "report.yaml").write_text(
+        """
+version: 1
+target: report
+cases:
+  - name: no text checks
+    output: report
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="eval case 'no text checks' does not define any checks"):
         evaluate_target(ProjectConfig.load(tmp_path), "report")
 
 
@@ -438,6 +475,88 @@ cases:
         evaluate_target(ProjectConfig.load(tmp_path), "metrics")
 
 
+def test_json_eval_rejects_invalid_numeric_check_at_load(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_metrics_project(tmp_path, sample_metrics())
+    (tmp_path / "eval_cases" / "metrics.yaml").write_text(
+        """
+version: 1
+target: metrics
+cases:
+  - name: malformed length threshold
+    output: metrics
+    json_path: $.tags
+    length_min: five
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="malformed length threshold.length_min must be an integer"):
+        evaluate_target(ProjectConfig.load(tmp_path), "metrics")
+
+
+def test_json_eval_rejects_null_numeric_check_at_load(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_metrics_project(tmp_path, sample_metrics())
+    (tmp_path / "eval_cases" / "metrics.yaml").write_text(
+        """
+version: 1
+target: metrics
+cases:
+  - name: null numeric max
+    output: metrics
+    json_path: $.visible_outputs
+    max:
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="null numeric max.max must be a number"):
+        evaluate_target(ProjectConfig.load(tmp_path), "metrics")
+
+
+def test_json_eval_rejects_case_without_checks_at_load(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_metrics_project(tmp_path, sample_metrics())
+    (tmp_path / "eval_cases" / "metrics.yaml").write_text(
+        """
+version: 1
+target: metrics
+cases:
+  - name: no JSON checks
+    output: metrics
+    json_path: $.summary_text
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ConfigError, match="eval case 'no JSON checks' does not define any JSON checks"):
+        evaluate_target(ProjectConfig.load(tmp_path), "metrics")
+
+
+def test_json_eval_allows_exists_true_as_only_check(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_metrics_project(tmp_path, sample_metrics())
+    (tmp_path / "eval_cases" / "metrics.yaml").write_text(
+        """
+version: 1
+target: metrics
+cases:
+  - name: summary exists
+    output: metrics
+    json_path: $.summary_text
+    exists: true
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["run", "metrics"]) == 0
+    result = evaluate_target(ProjectConfig.load(tmp_path), "metrics")
+    assert result is not None
+    assert result.failed == 0
+    assert result.results[0].reason == "1 selected JSON value(s), 1 check(s) passed"
+
+
 def test_compare_reports_json_metric_deltas(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     write_metrics_project(tmp_path, sample_metrics())
@@ -475,6 +594,99 @@ def test_compare_omits_metric_deltas_when_json_metrics_unchanged(tmp_path, monke
     compare_text = compare_to_baseline(ProjectConfig.load(tmp_path), "metrics", with_evals=False)
     assert "outputs:      unchanged" in compare_text
     assert "## Metric Deltas" not in compare_text
+
+
+def test_compare_github_format_adds_pr_comment_scaffold(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_metrics_project(tmp_path, sample_metrics())
+    (tmp_path / "eval_cases" / "metrics.yaml").write_text(
+        """
+version: 1
+target: metrics
+cases:
+  - name: visible outputs present
+    output: metrics
+    json_path: $.visible_outputs
+    exists: true
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["run", "metrics"]) == 0
+    assert main(["approve", "metrics"]) == 0
+
+    changed = sample_metrics(failed=2, visible_outputs=11, p95=735, cost=18.75, malformed=1)
+    (tmp_path / "context" / "metrics.json").write_text(json.dumps(changed, indent=2, sort_keys=True), encoding="utf-8")
+    assert main(["run", "metrics"]) == 0
+
+    config = ProjectConfig.load(tmp_path)
+    text_default = compare_to_baseline(config, "metrics", with_evals=False)
+    text_explicit = compare_to_baseline(config, "metrics", with_evals=False, fmt="text")
+    github = compare_to_baseline(config, "metrics", fmt="github")
+
+    assert text_default == text_explicit
+    assert text_default.startswith("# lmake compare\n")
+    assert "\n## Metric Deltas\n" in text_default
+    assert "<details><summary>artifact diff</summary>" not in text_default
+
+    assert github.startswith("<!-- lmake-compare: metrics -->\n### lmake compare: metrics\n")
+    assert "⚠️ fingerprint changed · ⚠️ outputs changed: metrics · ✅ evals passed: 1 passed" in github
+    assert "\n### Metric Deltas\n" in github
+    assert "- ✅ visible outputs present:" in github
+    assert "- PASS " not in github
+    assert "<details><summary>artifact diff</summary>" in github
+    assert "````diff\n# lmake diff\n" in github
+
+
+def test_compare_github_artifact_diff_truncates_long_output():
+    diff_text = "\n".join(f"line {index}" for index in range(305))
+
+    rendered = github_artifact_diff(diff_text, limit=300)
+
+    assert "line 299\n... truncated (5 more lines)" in rendered
+    assert "line 300" not in rendered
+
+
+def test_compare_exit_code_reports_changed_outputs_and_failed_evals(tmp_path, monkeypatch, capsys):
+    output_project = tmp_path / "output-change"
+    output_project.mkdir()
+    monkeypatch.chdir(output_project)
+    write_metrics_project(output_project, sample_metrics())
+
+    assert main(["run", "metrics"]) == 0
+    assert main(["approve", "metrics"]) == 0
+    assert main(["compare", "metrics", "--exit-code"]) == 0
+    capsys.readouterr()
+
+    changed = sample_metrics(visible_outputs=10)
+    (output_project / "context" / "metrics.json").write_text(json.dumps(changed, indent=2, sort_keys=True), encoding="utf-8")
+    assert main(["run", "metrics"]) == 0
+    assert main(["compare", "metrics", "--exit-code"]) == 1
+    capsys.readouterr()
+
+    eval_project = tmp_path / "eval-failure"
+    eval_project.mkdir()
+    monkeypatch.chdir(eval_project)
+    write_metrics_project(eval_project, sample_metrics())
+
+    assert main(["run", "metrics"]) == 0
+    assert main(["approve", "metrics"]) == 0
+    (eval_project / "eval_cases" / "metrics.yaml").write_text(
+        """
+version: 1
+target: metrics
+cases:
+  - name: visible outputs stay tiny
+    output: metrics
+    json_path: $.visible_outputs
+    max: 1
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    assert main(["compare", "metrics", "--exit-code"]) == 1
+    assert main(["compare", "metrics", "--no-evals", "--exit-code"]) == 0
+    capsys.readouterr()
 
 
 def test_approval_records_do_not_overwrite_with_same_timestamp(tmp_path, monkeypatch):
