@@ -5,12 +5,13 @@ import pytest
 
 from lmake.cli import main
 from lmake.baseline import approve_latest, load_baseline
-from lmake.compare import compare_to_baseline, github_artifact_diff
+from lmake.compare import CompareResult, compare_exit_code, compare_to_baseline, github_artifact_diff
 from lmake.config import ProjectConfig
 from lmake.evals import evaluate_target
 from lmake.engine import collect_outputs, default_outputs, fingerprint_bundle, make_base_manifest, status_all
 from lmake.errors import ConfigError, TargetError
 from lmake.gc import gc_project
+from lmake.judges import JudgeAttachment, JudgeVerdictRef
 from lmake.publish import publish_run
 from lmake.state import ProjectState
 from lmake.web import context_files, create_app, project_snapshot, safe_context_path, snapshot_signature
@@ -689,6 +690,31 @@ cases:
     capsys.readouterr()
 
 
+def test_compare_exit_code_ignores_informational_judge_status():
+    result = CompareResult(
+        target="critique",
+        baseline_run="baseline",
+        latest_run="latest",
+        same_fingerprint=True,
+        changed_outputs=[],
+        execution_changes=[],
+        metric_rows=[],
+        judges=[
+            JudgeAttachment(
+                judge_target="judge-critique",
+                baseline=JudgeVerdictRef(run_id="judge-old", verdict="pass", scores={}, failures=[]),
+                latest=JudgeVerdictRef(run_id="judge-new", verdict="fail", scores={}, failures=["traceability"]),
+                score_rows=[],
+            )
+        ],
+        baseline_eval=None,
+        latest_eval=None,
+        diff_text="",
+    )
+
+    assert compare_exit_code(result) == 0
+
+
 def write_judge_project(tmp_path):
     (tmp_path / "context").mkdir()
     (tmp_path / "programs").mkdir()
@@ -769,6 +795,7 @@ def run_judge(inputs):
             "target": "critique",
             "artifact": {"name": "critique", "path": "artifacts/critique.md", "sha256": critique.sha256},
             "scores": scores,
+            "metadata": {"word_count": len(text.split())},
             "failures": failures,
             "verdict": "pass" if not failures else "fail",
             "rationale": "traceability is present" if not failures else "missing traceability evidence",
@@ -799,6 +826,7 @@ targets:
       critique: artifacts/critique.md
   judge-critique:
     runner: dspy
+    judges: critique
     needs:
       - critique
     program: programs/judge_demo.py
@@ -873,6 +901,159 @@ def test_judge_target_verdict_loop_reports_score_delta(tmp_path, monkeypatch):
 
     compare_text = compare_to_baseline(ProjectConfig.load(tmp_path), "judge-critique")
     assert "| verdict | `$.scores.traceability` | 5 | 1 | -4 |" in compare_text
+    assert compare_text.index("`$.scores.traceability`") < compare_text.index("`$.metadata.word_count`")
+
+
+def test_compare_judged_target_reports_matching_judge_verdicts(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_judge_project(tmp_path)
+
+    assert main(["run", "judge-critique"]) == 0
+    state = ProjectState(tmp_path)
+    baseline_judge = state.latest_manifest_for_target("judge-critique")
+    assert baseline_judge is not None
+    assert main(["approve", "critique"]) == 0
+
+    (tmp_path / "context" / "source.md").write_text("traceable: no\n", encoding="utf-8")
+    assert main(["run", "judge-critique"]) == 0
+    latest_judge = ProjectState(tmp_path).latest_manifest_for_target("judge-critique")
+    assert latest_judge is not None
+    assert latest_judge["run_id"] != baseline_judge["run_id"]
+
+    config = ProjectConfig.load(tmp_path)
+    compare_text = compare_to_baseline(config, "critique", with_evals=False)
+    assert "## Judge Verdicts" in compare_text
+    assert "## Evals" not in compare_text
+    assert "### judge-critique" in compare_text
+    assert f"baseline: pass ({baseline_judge['run_id']})" in compare_text
+    assert f"latest: fail ({latest_judge['run_id']})" in compare_text
+    assert "latest_failures: traceability" in compare_text
+    assert "| `traceability` | 5 | 1 | -4 |" in compare_text
+
+    github = compare_to_baseline(config, "critique", with_evals=False, fmt="github")
+    assert "⚠️ judge-critique: pass → fail" in github
+    assert "\n### Judge Verdicts\n" in github
+    assert f"baseline: pass ({baseline_judge['run_id']})" in github
+    assert f"latest: fail ({latest_judge['run_id']})" in github
+
+
+def test_compare_judged_target_reports_missing_latest_verdict(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_judge_project(tmp_path)
+
+    assert main(["run", "judge-critique"]) == 0
+    baseline_judge = ProjectState(tmp_path).latest_manifest_for_target("judge-critique")
+    assert baseline_judge is not None
+    assert main(["approve", "critique"]) == 0
+
+    (tmp_path / "context" / "source.md").write_text("traceable: no\n", encoding="utf-8")
+    assert main(["run", "critique"]) == 0
+
+    compare_text = compare_to_baseline(ProjectConfig.load(tmp_path), "critique", with_evals=False)
+    assert "## Judge Verdicts" in compare_text
+    assert f"baseline: pass ({baseline_judge['run_id']})" in compare_text
+    assert "latest: no verdict recorded (no matching artifact bytes)" in compare_text
+    judge_section = compare_text.split("## Judge Verdicts", 1)[1].split("# lmake diff", 1)[0]
+    assert "| score | baseline | latest | delta |" not in judge_section
+    assert "| `traceability` |" not in judge_section
+
+
+def test_config_validation_accepts_valid_judge_target(tmp_path):
+    write_lmakefile(
+        tmp_path,
+        """
+version: 1
+targets:
+  report:
+    inputs:
+      - context/source.md
+    outputs:
+      report: artifacts/report.md
+  judge-report:
+    judges: report
+    inputs:
+      - artifacts/report.md
+    outputs:
+      verdict: artifacts/report_verdict.json
+""",
+    )
+
+    assert ProjectConfig.load(tmp_path).target("judge-report").judges == "report"
+
+
+def test_config_validation_rejects_judge_unknown_target(tmp_path):
+    assert_bad_config(
+        tmp_path,
+        """
+version: 1
+targets:
+  judge-report:
+    judges: missing
+    inputs:
+      - artifacts/report.md
+    outputs:
+      verdict: artifacts/report_verdict.json
+""",
+        "targets.judge-report.judges references unknown target 'missing'",
+    )
+
+
+def test_config_validation_rejects_self_judging_target(tmp_path):
+    assert_bad_config(
+        tmp_path,
+        """
+version: 1
+targets:
+  report:
+    judges: report
+    inputs:
+      - artifacts/report.md
+    outputs:
+      verdict: artifacts/report_verdict.json
+""",
+        "targets.report.judges must not reference itself",
+    )
+
+
+def test_config_validation_rejects_judge_without_judged_output_input(tmp_path):
+    assert_bad_config(
+        tmp_path,
+        """
+version: 1
+targets:
+  report:
+    outputs:
+      report: artifacts/report.md
+  judge-report:
+    judges: report
+    inputs:
+      - context/source.md
+    outputs:
+      verdict: artifacts/report_verdict.json
+""",
+        "targets.judge-report.judges must declare an input that is an output of target 'report': artifacts/report.md",
+    )
+
+
+def test_config_validation_rejects_ambiguous_judge_outputs(tmp_path):
+    assert_bad_config(
+        tmp_path,
+        """
+version: 1
+targets:
+  report:
+    outputs:
+      report: artifacts/report.md
+  judge-report:
+    judges: report
+    inputs:
+      - artifacts/report.md
+    outputs:
+      summary: artifacts/report_judge_summary.json
+      scores: artifacts/report_judge_scores.json
+""",
+        "targets.judge-report.outputs must have exactly one output or an output named 'verdict' when judges is set",
+    )
 
 
 def test_approval_records_do_not_overwrite_with_same_timestamp(tmp_path, monkeypatch):

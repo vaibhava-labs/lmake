@@ -75,6 +75,7 @@ targets:
   judge-critique:
     description: Score the critique artifact against a review rubric.
     runner: dspy
+    judges: critique
     needs:
       - critique
     program: programs/research_demo.py
