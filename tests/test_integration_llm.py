@@ -1,3 +1,4 @@
+import json
 import os
 from pathlib import Path
 
@@ -187,3 +188,100 @@ cases:
     publish_dir = publish_run(updated_config, latest=True)
     assert (publish_dir / "index.html").exists()
     assert (publish_dir / "review.json").exists()
+
+
+def test_haiku_judge_verdict_shape(tmp_path):
+    require_real_llm()
+    model = os.environ.get("LMAKE_LLM_MODEL", "anthropic/claude-haiku-4-5-20251001")
+
+    write(
+        tmp_path / "lmakefile.yaml",
+        f"""
+version: 1
+
+defaults:
+  provider: litellm
+  model: {model}
+  params:
+    temperature: 0
+    max_tokens: 260
+  cache:
+    reuse_policy: input-identical
+  system: |
+    Return raw JSON only. Do not wrap the response in Markdown.
+
+targets:
+  judge-critique:
+    inputs:
+      - artifacts/critique.md
+    prompt: prompts/judge.md
+    outputs:
+      verdict: artifacts/critique_verdict.json
+""",
+    )
+    write(
+        tmp_path / "artifacts" / "critique.md",
+        """
+# Critique
+
+## Confidence
+
+The report is grounded in source notes.
+
+## Traceability Check
+
+- Claims artifact length: 20 words.
+- Synthesis artifact length: 40 words.
+- Source documents inspected: 3.
+""",
+    )
+    write(
+        tmp_path / "prompts" / "judge.md",
+        """
+Score the input critique and return exactly one JSON object:
+{
+  "schema": "lmake.judge_verdict.v0",
+  "target": "critique",
+  "artifact": {"name": "critique", "path": "artifacts/critique.md"},
+  "scores": {"traceability": 1, "source_accounting": 1, "readability": 1},
+  "failures": [],
+  "verdict": "pass",
+  "rationale": "one short sentence"
+}
+
+Use integer scores from 1 to 5. Use verdict "pass" or "fail".
+Return raw JSON only.
+""",
+    )
+    write(
+        tmp_path / "eval_cases" / "judge-critique.yaml",
+        """
+version: 1
+target: judge-critique
+cases:
+  - name: judge emitted verdict schema
+    output: verdict
+    json_path: $.schema
+    equals: lmake.judge_verdict.v0
+  - name: judge emitted traceability score
+    output: verdict
+    json_path: $.scores.traceability
+    exists: true
+    type: number
+  - name: judge emitted verdict string
+    output: verdict
+    json_path: $.verdict
+    type: string
+""",
+    )
+
+    assert main(["-C", str(tmp_path), "run", "judge-critique"]) == 0
+    verdict = json.loads((tmp_path / "artifacts" / "critique_verdict.json").read_text(encoding="utf-8"))
+    assert verdict["schema"] == "lmake.judge_verdict.v0"
+    assert isinstance(verdict.get("scores"), dict)
+    assert isinstance(verdict["scores"].get("traceability"), (int, float))
+    assert verdict.get("verdict") in {"pass", "fail"}
+
+    result = evaluate_target(ProjectConfig.load(tmp_path), "judge-critique")
+    assert result is not None
+    assert len(result.results) == 3

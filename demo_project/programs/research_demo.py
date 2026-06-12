@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass
 
@@ -24,6 +25,13 @@ def artifact_text(inputs, suffix):
         if part.path.endswith(suffix):
             return part.text
     return ""
+
+
+def artifact_part(inputs, path):
+    for part in inputs:
+        if part.path == path:
+            return part
+    return None
 
 
 def extract_findings(inputs):
@@ -185,3 +193,78 @@ The synthesis is directionally strong because it is supported by multiple source
 - Source documents inspected: {len(context_parts(inputs))}.
 """
     return {"critique": content}
+
+
+def score_from_features(features):
+    return max(1, min(5, 1 + sum(1 for item in features if item)))
+
+
+def run_judge(inputs):
+    critique = artifact_part(inputs, "artifacts/critique.md")
+    critique_text = critique.text if critique is not None else ""
+    words = re.findall(r"\b\w+\b", critique_text)
+    word_count = len(words)
+    source_type_terms = ["interviews", "support tickets", "product metrics", "implementation notes"]
+    required_headings = [
+        "## Confidence",
+        "## Evidence Gaps",
+        "## Risks",
+        "## Suggested Next Data To Collect",
+    ]
+
+    traceability_features = [
+        "## Traceability Check" in critique_text,
+        "Claims artifact length" in critique_text,
+        "Synthesis artifact length" in critique_text,
+        "Source documents inspected" in critique_text,
+    ]
+    source_count_match = re.search(r"Source documents inspected:\s*(\d+)", critique_text)
+    source_count = int(source_count_match.group(1)) if source_count_match else 0
+    source_accounting_features = [
+        source_count >= 3,
+        sum(1 for term in source_type_terms if term in critique_text.lower()) >= 3,
+        "source" in critique_text.lower(),
+        "provenance" in critique_text.lower() or "traceability" in critique_text.lower(),
+    ]
+    readability_features = [
+        120 <= word_count <= 700,
+        all(heading in critique_text for heading in required_headings),
+        "## Open Questions" in critique_text,
+        "## What The Brief Gets Right" in critique_text,
+    ]
+
+    scores = {
+        "traceability": score_from_features(traceability_features),
+        "source_accounting": score_from_features(source_accounting_features),
+        "readability": score_from_features(readability_features),
+    }
+    failures = [name for name, score in scores.items() if score < 3]
+    rationale = (
+        "The critique preserves traceability, source accounting, and readable review structure."
+        if not failures
+        else "The critique is missing rubric evidence for: " + ", ".join(failures) + "."
+    )
+    return {
+        "verdict": {
+            "schema": "lmake.judge_verdict.v0",
+            "target": "critique",
+            "artifact": {
+                "name": "critique",
+                "path": "artifacts/critique.md",
+                "sha256": critique.sha256 if critique is not None else "",
+            },
+            "scores": scores,
+            "failures": failures,
+            "verdict": "pass" if not failures else "fail",
+            "rationale": rationale,
+            "metadata": {
+                "word_count": word_count,
+                "source_documents_inspected": source_count,
+                "features": {
+                    "traceability": traceability_features,
+                    "source_accounting": source_accounting_features,
+                    "readability": readability_features,
+                },
+            },
+        }
+    }

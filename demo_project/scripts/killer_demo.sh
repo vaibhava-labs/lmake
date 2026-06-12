@@ -24,6 +24,9 @@ cp prompts/critique.safe.md prompts/critique.md
 run_lmake run
 run_lmake eval critique
 run_lmake approve critique
+run_lmake run review
+run_lmake eval judge-critique
+run_lmake approve judge-critique
 
 echo
 echo "== 1. Edit prompt: introduce a concise-but-unsafe regression =="
@@ -32,7 +35,7 @@ run_lmake status
 
 echo
 echo "== 2. Re-run the workflow =="
-run_lmake run
+run_lmake run review
 
 echo
 echo "== 3. Eval catches the regression =="
@@ -41,6 +44,12 @@ if run_lmake eval critique; then
   exit 1
 else
   echo "Eval failed as expected: traceability/risk sections were dropped."
+fi
+if run_lmake eval judge-critique; then
+  echo "Expected judge eval to fail after regression prompt, but it passed." >&2
+  exit 1
+else
+  echo "Judge eval failed as expected: traceability score dropped."
 fi
 
 echo
@@ -51,10 +60,12 @@ echo
 echo "== 5. Fix prompt, rerun, approve, and publish =="
 cp prompts/critique.safe.md prompts/critique.md
 run_lmake status
-run_lmake run
+run_lmake run review
 run_lmake eval critique
+run_lmake eval judge-critique
 run_lmake compare critique
 run_lmake approve critique
+run_lmake approve judge-critique
 run_lmake publish --latest
 
 echo
