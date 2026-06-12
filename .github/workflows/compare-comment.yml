@@ -26,7 +26,7 @@ jobs:
           git checkout origin/main
           python -m pip install -e .
           cd demo_project
-          python -m lmake run
+          python -m lmake run review
           python -m lmake approve critique
 
       - name: Compare PR head to main baseline
@@ -34,7 +34,7 @@ jobs:
           git checkout -f ${{ github.event.pull_request.head.sha }}
           python -m pip install -e .
           cd demo_project
-          python -m lmake run
+          python -m lmake run review
           python -m lmake compare critique --format github > /tmp/comment.md
 
       # Fork PRs do not get a write-capable token, so keep this same-repo only and tolerant.

@@ -9,6 +9,7 @@ from .config import ProjectConfig
 from .engine import diff_runs
 from .errors import ConfigError, RunNotFoundError
 from .evals import EvalSuiteResult, evaluate_target, text_from_output
+from .judges import JudgeAttachment, JudgeVerdictRef, collect_judge_attachments
 from .state import ProjectState
 
 
@@ -26,6 +27,7 @@ INTERESTING_METRIC_FRAGMENTS = (
     ".latency.p95",
     ".cost.",
     ".cost_",
+    ".scores.",
 )
 
 GITHUB_DIFF_LINE_LIMIT = 300
@@ -40,6 +42,7 @@ class CompareResult:
     changed_outputs: list[str]
     execution_changes: list[str]
     metric_rows: list[dict[str, str]]
+    judges: list[JudgeAttachment]
     baseline_eval: EvalSuiteResult | None
     latest_eval: EvalSuiteResult | None
     diff_text: str
@@ -200,6 +203,70 @@ def github_eval_section(baseline_eval: EvalSuiteResult | None, latest_eval: Eval
     return chunks
 
 
+def verdict_line(label: str, verdict: JudgeVerdictRef | None, note: str | None) -> str:
+    if verdict is None:
+        return f"{label}: no verdict recorded" + (f" ({note})" if note else "") + "\n"
+    return f"{label}: {verdict.verdict} ({verdict.run_id})\n"
+
+
+def failures_line(label: str, verdict: JudgeVerdictRef | None) -> str | None:
+    if verdict is None or not verdict.failures:
+        return None
+    return f"{label}_failures: " + ", ".join(verdict.failures) + "\n"
+
+
+def judge_score_table(rows: list[dict[str, str]]) -> list[str]:
+    if not rows:
+        return []
+    chunks = [
+        "| score | baseline | latest | delta |\n",
+        "|---|---:|---:|---:|\n",
+    ]
+    for row in rows:
+        chunks.append(f"| `{row['name']}` | {row['baseline']} | {row['latest']} | {row['delta']} |\n")
+    return chunks
+
+
+def text_judge_section(attachments: list[JudgeAttachment]) -> list[str]:
+    if not attachments:
+        return []
+    chunks = ["\n## Judge Verdicts\n"]
+    for attachment in attachments:
+        chunks.append(f"\n### {attachment.judge_target}\n")
+        chunks.append(verdict_line("baseline", attachment.baseline, attachment.baseline_note))
+        chunks.append(verdict_line("latest", attachment.latest, attachment.latest_note))
+        for line in [
+            failures_line("baseline", attachment.baseline),
+            failures_line("latest", attachment.latest),
+        ]:
+            if line is not None:
+                chunks.append(line)
+        if attachment.score_rows:
+            chunks.append("\n")
+            chunks.extend(judge_score_table(attachment.score_rows))
+    return chunks
+
+
+def github_judge_section(attachments: list[JudgeAttachment]) -> list[str]:
+    if not attachments:
+        return []
+    chunks = ["\n### Judge Verdicts\n"]
+    for attachment in attachments:
+        chunks.append(f"\n#### {attachment.judge_target}\n")
+        chunks.append(verdict_line("baseline", attachment.baseline, attachment.baseline_note))
+        chunks.append(verdict_line("latest", attachment.latest, attachment.latest_note))
+        for line in [
+            failures_line("baseline", attachment.baseline),
+            failures_line("latest", attachment.latest),
+        ]:
+            if line is not None:
+                chunks.append(line)
+        if attachment.score_rows:
+            chunks.append("\n")
+            chunks.extend(judge_score_table(attachment.score_rows))
+    return chunks
+
+
 def collect_compare_result(config: ProjectConfig, target: str, *, with_evals: bool = True) -> CompareResult:
     config.target(target)
     baseline = load_baseline(config.root, target)
@@ -235,6 +302,15 @@ def collect_compare_result(config: ProjectConfig, target: str, *, with_evals: bo
         changed_outputs=changed_outputs,
         execution_changes=execution_changes,
         metric_rows=metric_delta_rows(state, baseline, latest),
+        judges=collect_judge_attachments(
+            config,
+            state,
+            target,
+            baseline_outputs=list(baseline.get("outputs", [])),
+            latest_outputs=list(latest.get("outputs", [])),
+            format_number=format_number,
+            format_delta=format_delta,
+        ),
         baseline_eval=baseline_eval,
         latest_eval=latest_eval,
         diff_text=diff_runs(config, baseline_run, latest_run),
@@ -254,11 +330,29 @@ def text_compare(result: CompareResult, *, with_evals: bool = True) -> str:
         chunks.append("\n## Execution Changes\n")
         chunks.extend(line + "\n" for line in result.execution_changes)
     chunks.extend(metric_delta_section_from_rows(result.metric_rows))
+    chunks.extend(text_judge_section(result.judges))
     if with_evals:
         chunks.extend(text_eval_section(result.baseline_eval, result.latest_eval))
     chunks.append("\n")
     chunks.append(result.diff_text)
     return "".join(chunks)
+
+
+def github_judge_chip(attachment: JudgeAttachment) -> str | None:
+    baseline = attachment.baseline
+    latest = attachment.latest
+    if baseline is None and latest is None:
+        return None
+    if baseline is not None and latest is None:
+        return f"⚠️ {attachment.judge_target}: no latest verdict"
+    if latest is not None and baseline is None:
+        marker = "✅" if latest.verdict == "pass" else "⚠️"
+        return f"{marker} {attachment.judge_target}: {latest.verdict}"
+    assert baseline is not None and latest is not None
+    if baseline.verdict != latest.verdict:
+        return f"⚠️ {attachment.judge_target}: {baseline.verdict} → {latest.verdict}"
+    marker = "✅" if latest.verdict == "pass" else "⚠️"
+    return f"{marker} {attachment.judge_target}: {latest.verdict}"
 
 
 def github_status_summary(result: CompareResult, *, with_evals: bool = True) -> str:
@@ -274,6 +368,10 @@ def github_status_summary(result: CompareResult, *, with_evals: bool = True) -> 
             parts.append(f"⚠️ evals failed: {result.latest_eval.passed} passed, {result.latest_eval.failed} failed")
         else:
             parts.append(f"✅ evals passed: {result.latest_eval.passed} passed")
+    for attachment in result.judges:
+        chip = github_judge_chip(attachment)
+        if chip is not None:
+            parts.append(chip)
     return " · ".join(parts)
 
 
@@ -302,6 +400,7 @@ def github_compare(result: CompareResult, *, with_evals: bool = True) -> str:
         chunks.append("\n### Execution Changes\n")
         chunks.extend(line + "\n" for line in result.execution_changes)
     chunks.extend(metric_delta_section_from_rows(result.metric_rows, heading="### Metric Deltas"))
+    chunks.extend(github_judge_section(result.judges))
     if with_evals:
         chunks.extend(github_eval_section(result.baseline_eval, result.latest_eval))
     chunks.append("\n")

@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from . import __version__
-from .config import ProjectConfig, TargetConfig
+from .config import ProjectConfig, TargetConfig, target_outputs
 from .dspy_runner import run_dspy_target
 from .errors import ConfigError, RunNotFoundError, TargetError
 from .hashing import file_hash, hash_json, tree_hash
@@ -116,9 +116,7 @@ def ttl_expired(target: TargetConfig, manifest: dict[str, Any]) -> bool:
 
 
 def default_outputs(target: TargetConfig) -> dict[str, str]:
-    if target.outputs:
-        return target.outputs
-    return {"default": f"artifacts/{target.name}.md"}
+    return target_outputs(target)
 
 
 def prompt_for_target(root: Path, target: TargetConfig) -> tuple[str, dict[str, Any]]:

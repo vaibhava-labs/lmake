@@ -32,6 +32,7 @@ TARGET_KEYS = {
     "params",
     "cache",
     "system",
+    "judges",
 }
 GROUP_KEYS = {"description", "targets"}
 CACHE_KEYS = {"reuse_policy", "ttl_seconds"}
@@ -234,10 +235,17 @@ class TargetConfig:
     system: str | None = None
     model_alias: str | None = None
     model_lock: ModelLockEntry | None = None
+    judges: str | None = None
 
     @property
     def spec_hash(self) -> str:
         return hash_json(self.raw)
+
+
+def target_outputs(target: TargetConfig) -> dict[str, str]:
+    if target.outputs:
+        return target.outputs
+    return {"default": f"artifacts/{target.name}.md"}
 
 
 @dataclass(frozen=True)
@@ -305,6 +313,7 @@ class ProjectConfig:
             validate_target_paths(root, name, spec, outputs)
             prompt = optional_string(spec.get("prompt"), f"targets.{name}.prompt")
             system = optional_string(spec.get("system", default_system), f"targets.{name}.system", allow_empty=True)
+            judges = optional_string(spec.get("judges"), f"targets.{name}.judges")
             targets[name] = TargetConfig(
                 name=name,
                 raw=merged,
@@ -320,11 +329,29 @@ class ProjectConfig:
                 system=system,
                 model_alias=model_resolution.alias,
                 model_lock=model_resolution.lock,
+                judges=judges,
             )
         for target in targets.values():
             for need in target.needs:
                 if need not in targets:
                     raise TargetError(f"target {target.name!r} needs unknown target {need!r}.")
+        for target in targets.values():
+            if target.judges is None:
+                continue
+            judged = targets.get(target.judges)
+            if judged is None:
+                raise ConfigError(f"targets.{target.name}.judges references unknown target {target.judges!r}.")
+            if judged.name == target.name:
+                raise ConfigError(f"targets.{target.name}.judges must not reference itself.")
+            judged_output_paths = set(target_outputs(judged).values())
+            if not any(input_path in judged_output_paths for input_path in target.inputs):
+                outputs_text = ", ".join(sorted(judged_output_paths))
+                raise ConfigError(
+                    f"targets.{target.name}.judges must declare an input that is an output of target {judged.name!r}: {outputs_text}."
+                )
+            judge_outputs = target_outputs(target)
+            if len(judge_outputs) != 1 and "verdict" not in judge_outputs:
+                raise ConfigError(f"targets.{target.name}.outputs must have exactly one output or an output named 'verdict' when judges is set.")
         groups: dict[str, list[str]] = {}
         for name, spec in raw_groups.items():
             if not isinstance(name, str):

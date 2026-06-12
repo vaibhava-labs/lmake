@@ -178,7 +178,8 @@ See [docs/behavioral-regression.md](docs/behavioral-regression.md) for the emerg
 
 ## LLM-judge evals
 
-Judges are ordinary targets that read an artifact and emit a structured verdict JSON artifact. Deterministic `eval_cases/` then gate the verdict bytes, while manifests keep the judged artifact, rubric prompt, model settings, and verdict provenance reviewable. See [docs/llm-judge.md](docs/llm-judge.md) for the `lmake.judge_verdict.v0` pattern and the demo's `judge-critique` target.
+Judges are ordinary targets that read an artifact and emit a structured verdict JSON artifact. Deterministic `eval_cases/` then gate the verdict bytes, while manifests keep the judged artifact, rubric prompt, model settings, and verdict provenance reviewable.
+When a judge target declares `judges: <target>`, `lmake compare <target>` attaches matching baseline/latest verdicts by artifact hash as an informational section; it does not affect compare exit codes or approval gates. See [docs/llm-judge.md](docs/llm-judge.md) for the `lmake.judge_verdict.v0` pattern and the demo's `judge-critique` target.
 
 ## Published demo
 

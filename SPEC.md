@@ -204,7 +204,9 @@ Judge verdict artifacts use schema `lmake.judge_verdict.v0`:
 }
 ```
 
-Judge targets are ordinary targets. They read a judged artifact, write a verdict artifact, and can be gated by deterministic JSON eval cases. `scores` are integers from 1 to 5, `verdict` is `pass` or `fail`, and `failures` lists rubric dimensions below threshold. Code-backed judges should copy `artifact.sha256` from the judged artifact input record. LLM-backed judges may omit `artifact.sha256`; their artifact linkage lives in the judge run manifest inputs.
+Judge targets are ordinary targets. They read a judged artifact, write a verdict artifact, and can be gated by deterministic JSON eval cases. A judge target may declare `judges: <target>` to attach verdicts to `lmake compare <target>`. When `judges` is set, the judge target must read at least one output path from the judged target and must expose exactly one output or an output named `verdict`. `scores` are integers from 1 to 5, `verdict` is `pass` or `fail`, and `failures` lists rubric dimensions below threshold. Code-backed judges should copy `artifact.sha256` from the judged artifact input record. LLM-backed judges may omit `artifact.sha256`; their artifact linkage lives in the judge run manifest inputs.
+
+`lmake compare <judged-target>` resolves declared judge verdicts by matching the compared artifact path and SHA-256 against judge run manifest inputs. It renders baseline/latest verdicts, failures, and changed score rows after metric deltas. Missing, malformed, or unmatched verdicts render as `no verdict recorded` with a reason. Judge verdicts are informational: they do not affect `lmake compare --exit-code`, do not gate approval, and render even when compare is run with `--no-evals`.
 
 ## 9. DSPy runner
 
@@ -271,7 +273,6 @@ The repository's demo can be published by CI to GitHub Pages by running the defa
 - remote cache protocol
 - semantic artifact diff protocol
 - task-level tool traces
-- judge verdict sections in compare for judged targets
 - richer DSPy compile records
 - MCP/tool dependency snapshots
 - merge strategy for run records

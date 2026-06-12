@@ -46,7 +46,7 @@
 - [ ] Markdown-aware diff
 - [ ] semantic diff plugin interface
 - [x] LLM-judge verdict artifact format (`lmake.judge_verdict.v0`)
-- [ ] judge verdict sections in `lmake compare` for judged targets
+- [x] judge verdict sections in `lmake compare` for judged targets
 - [x] baseline/compare/eval/approve controls in web Details mode
 - [ ] Weave/Langfuse/Braintrust trace refs
 

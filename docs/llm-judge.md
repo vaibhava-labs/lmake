@@ -16,6 +16,7 @@ A judge target depends on the artifact it reviews:
 targets:
   judge-critique:
     runner: dspy
+    judges: critique
     needs: [critique]
     program: programs/research_demo.py
     inputs:
@@ -32,6 +33,10 @@ targets:
 The demo uses a deterministic code-backed judge so the pattern works without
 API keys. A real judge can use `runner: provider`, `provider: litellm`, and a
 strict JSON rubric prompt.
+
+`judges` declares which target is being judged. When it is set, the judge target
+must read at least one output path from that target and must expose either one
+output or an output named `verdict`.
 
 ## Verdict Schema
 
@@ -97,6 +102,19 @@ lmake compare judge-critique
 Because verdicts are JSON, `lmake compare judge-critique` already reports score
 deltas through the JSON metric delta table.
 
+## Compare Integration
+
+When a judge target declares `judges: critique`, `lmake compare critique`
+includes a Judge Verdicts section for that judge. `lmake` resolves verdicts by
+matching the compared artifact path and SHA-256 in the judge run manifest inputs,
+so it can attach the baseline verdict and latest verdict even when newer judge
+runs exist for different artifact bytes.
+
+Missing, malformed, or unmatched verdicts render as `no verdict recorded` with a
+short reason. Judge verdicts are informational in compare output: they do not
+affect `lmake compare --exit-code`, do not gate `lmake approve`, and still render
+when compare is run with `--no-evals`.
+
 ## LLM-Backed Variant
 
 For a real model judge, write a rubric prompt that demands raw JSON only:
@@ -105,6 +123,7 @@ For a real model judge, write a rubric prompt that demands raw JSON only:
 targets:
   judge-critique:
     runner: provider
+    judges: critique
     provider: litellm
     model: anthropic/claude-haiku-4-5-20251001
     needs: [critique]
@@ -130,7 +149,3 @@ artifact or rubric changes.
 
 Judge verdicts are recorded observations with provenance, not deterministic
 truth. Use deterministic eval cases to decide whether a verdict is acceptable.
-
-Surfacing judge verdict sections in `lmake compare <judged-target>` is future
-work. Today, compare the judge target itself to inspect verdict and score
-changes.
