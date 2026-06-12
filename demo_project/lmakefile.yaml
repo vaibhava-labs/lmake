@@ -15,6 +15,9 @@ groups:
   brief:
     targets:
       - synthesize
+  review:
+    targets:
+      - judge-critique
 
 targets:
   extract:
@@ -68,3 +71,19 @@ targets:
       configure: false
     outputs:
       critique: artifacts/critique.md
+
+  judge-critique:
+    description: Score the critique artifact against a review rubric.
+    runner: dspy
+    needs:
+      - critique
+    program: programs/research_demo.py
+    inputs:
+      - artifacts/critique.md
+    prompt: prompts/judge_critique.md
+    dspy:
+      action: run
+      run: run_judge
+      configure: false
+    outputs:
+      verdict: artifacts/critique_verdict.json

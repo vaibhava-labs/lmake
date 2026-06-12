@@ -190,6 +190,22 @@ baselines/approvals/<target>/<timestamp>_<run_id>.json
 
 Garbage collection must keep baseline run manifests and every content-addressed output object referenced by kept baseline manifests.
 
+Judge verdict artifacts use schema `lmake.judge_verdict.v0`:
+
+```json
+{
+  "schema": "lmake.judge_verdict.v0",
+  "target": "critique",
+  "artifact": {"name": "critique", "path": "artifacts/critique.md", "sha256": "..."},
+  "scores": {"traceability": 4, "source_accounting": 5, "readability": 3},
+  "failures": [],
+  "verdict": "pass",
+  "rationale": "one short paragraph"
+}
+```
+
+Judge targets are ordinary targets. They read a judged artifact, write a verdict artifact, and can be gated by deterministic JSON eval cases. `scores` are integers from 1 to 5, `verdict` is `pass` or `fail`, and `failures` lists rubric dimensions below threshold. Code-backed judges should copy `artifact.sha256` from the judged artifact input record. LLM-backed judges may omit `artifact.sha256`; their artifact linkage lives in the judge run manifest inputs.
+
 ## 9. DSPy runner
 
 DSPy targets use `runner: dspy`. They are still ordinary targets: their source programs, prompts, inputs, model settings, and outputs are fingerprinted and recorded in immutable manifests.
@@ -255,7 +271,7 @@ The repository's demo can be published by CI to GitHub Pages by running the defa
 - remote cache protocol
 - semantic artifact diff protocol
 - task-level tool traces
-- LLM-judge eval attachments
+- judge verdict sections in compare for judged targets
 - richer DSPy compile records
 - MCP/tool dependency snapshots
 - merge strategy for run records

@@ -1,0 +1,29 @@
+version: 1
+target: judge-critique
+cases:
+  - name: verdict uses judge schema
+    output: verdict
+    json_path: $.schema
+    equals: lmake.judge_verdict.v0
+  - name: traceability score stays above threshold
+    output: verdict
+    json_path: $.scores.traceability
+    min: 3
+  - name: rubric scores stay above threshold
+    output: verdict
+    json_path: $.scores.*
+    min: 3
+  - name: judge verdict passes
+    output: verdict
+    json_path: $.verdict
+    equals: pass
+  - name: no rubric dimensions failed
+    output: verdict
+    json_path: $.failures
+    type: array
+    length_max: 0
+  - name: judged artifact hash is recorded
+    output: verdict
+    json_path: $.artifact.sha256
+    exists: true
+    type: string

@@ -112,6 +112,10 @@ can reason about behavior:
 }
 ```
 
+For generated review judgments, use the judge-as-target pattern in
+[LLM-judge evals](llm-judge.md): the judge emits a structured verdict artifact,
+and deterministic JSON eval cases gate that verdict.
+
 Then eval suites can use JSON metric checks:
 
 ```yaml

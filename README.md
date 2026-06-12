@@ -169,11 +169,16 @@ It uses four source documents in `context/` and produces:
 
 The target graph is `extract -> synthesize -> critique`, with `default_group: update` so both the CLI and web UI can use one Update action.
 The demo also includes eval cases for `critique`, so you can run `lmake eval critique`, `lmake approve critique`, edit context, run again, and use `lmake compare critique`.
+The optional `review` group runs `judge-critique` and produces `artifacts/critique_verdict.json`.
 
 For a tighter regression story, run `bash demo_project/scripts/killer_demo.sh` or follow [docs/killer-demo.md](docs/killer-demo.md). It shows a prompt edit dropping traceability, `lmake eval` catching it, `lmake compare` explaining the delta against the approved baseline, and `lmake publish` producing the reviewed bundle.
 
 See [docs/recipes.md](docs/recipes.md) for the first review-loop recipes, including an opt-in Haiku integration proof.
 See [docs/behavioral-regression.md](docs/behavioral-regression.md) for the emerging case/suite/label pattern for AI behavior regression workflows.
+
+## LLM-judge evals
+
+Judges are ordinary targets that read an artifact and emit a structured verdict JSON artifact. Deterministic `eval_cases/` then gate the verdict bytes, while manifests keep the judged artifact, rubric prompt, model settings, and verdict provenance reviewable. See [docs/llm-judge.md](docs/llm-judge.md) for the `lmake.judge_verdict.v0` pattern and the demo's `judge-critique` target.
 
 ## Published demo
 

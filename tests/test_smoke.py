@@ -689,6 +689,192 @@ cases:
     capsys.readouterr()
 
 
+def write_judge_project(tmp_path):
+    (tmp_path / "context").mkdir()
+    (tmp_path / "programs").mkdir()
+    (tmp_path / "eval_cases").mkdir()
+    (tmp_path / "prompts").mkdir()
+    (tmp_path / "context" / "source.md").write_text("traceable: yes\n", encoding="utf-8")
+    (tmp_path / "prompts" / "critique.md").write_text("Generate the critique.\n", encoding="utf-8")
+    (tmp_path / "prompts" / "judge.md").write_text("Score traceability, source accounting, and readability.\n", encoding="utf-8")
+    (tmp_path / "programs" / "judge_demo.py").write_text(
+        """
+import re
+
+
+def part(inputs, path):
+    return next(item for item in inputs if item.path == path)
+
+
+def score(features):
+    return max(1, min(5, 1 + sum(1 for item in features if item)))
+
+
+def run_critique(inputs):
+    source = part(inputs, "context/source.md").text
+    traceable = "traceable: yes" in source
+    traceability = (
+        "## Traceability Check\\n\\n"
+        "- Claims artifact length: 42 words.\\n"
+        "- Synthesis artifact length: 84 words.\\n"
+        "- Source documents inspected: 4.\\n\\n"
+        if traceable
+        else ""
+    )
+    return {
+        "critique": (
+            "# Critique\\n\\n"
+            "## Confidence\\n\\n"
+            "The review cites interviews, support tickets, product metrics, and implementation notes.\\n\\n"
+            "## Evidence Gaps\\n\\n"
+            "- Needs an external customer proof.\\n\\n"
+            "## Risks\\n\\n"
+            "- The publish path still depends on external hosting.\\n\\n"
+            "## Suggested Next Data To Collect\\n\\n"
+            "- Ask a reviewer to inspect the report.\\n\\n"
+            + traceability
+        )
+    }
+
+
+def run_judge(inputs):
+    critique = part(inputs, "artifacts/critique.md")
+    text = critique.text
+    source_count = re.search(r"Source documents inspected:\\s*(\\d+)", text)
+    source_count_value = int(source_count.group(1)) if source_count else 0
+    scores = {
+        "traceability": score([
+            "## Traceability Check" in text,
+            "Claims artifact length" in text,
+            "Synthesis artifact length" in text,
+            "Source documents inspected" in text,
+        ]),
+        "source_accounting": score([
+            source_count_value >= 3,
+            "interviews" in text,
+            "support tickets" in text,
+            "product metrics" in text,
+        ]),
+        "readability": score([
+            "## Confidence" in text,
+            "## Evidence Gaps" in text,
+            "## Risks" in text,
+            "## Suggested Next Data To Collect" in text,
+        ]),
+    }
+    failures = [name for name, value in scores.items() if value < 3]
+    return {
+        "verdict": {
+            "schema": "lmake.judge_verdict.v0",
+            "target": "critique",
+            "artifact": {"name": "critique", "path": "artifacts/critique.md", "sha256": critique.sha256},
+            "scores": scores,
+            "failures": failures,
+            "verdict": "pass" if not failures else "fail",
+            "rationale": "traceability is present" if not failures else "missing traceability evidence",
+        }
+    }
+""".lstrip(),
+        encoding="utf-8",
+    )
+    write_lmakefile(
+        tmp_path,
+        """
+version: 1
+defaults:
+  provider: mock
+  model: mock/deterministic
+targets:
+  critique:
+    runner: dspy
+    program: programs/judge_demo.py
+    inputs:
+      - context/source.md
+    prompt: prompts/critique.md
+    dspy:
+      action: run
+      run: run_critique
+      configure: false
+    outputs:
+      critique: artifacts/critique.md
+  judge-critique:
+    runner: dspy
+    needs:
+      - critique
+    program: programs/judge_demo.py
+    inputs:
+      - artifacts/critique.md
+    prompt: prompts/judge.md
+    dspy:
+      action: run
+      run: run_judge
+      configure: false
+    outputs:
+      verdict: artifacts/critique_verdict.json
+""",
+    )
+    (tmp_path / "eval_cases" / "judge-critique.yaml").write_text(
+        """
+version: 1
+target: judge-critique
+cases:
+  - name: verdict uses judge schema
+    output: verdict
+    json_path: $.schema
+    equals: lmake.judge_verdict.v0
+  - name: scores pass threshold
+    output: verdict
+    json_path: $.scores.*
+    min: 3
+  - name: verdict passes
+    output: verdict
+    json_path: $.verdict
+    equals: pass
+  - name: failures are empty
+    output: verdict
+    json_path: $.failures
+    type: array
+    length_max: 0
+  - name: judged hash is recorded
+    output: verdict
+    json_path: $.artifact.sha256
+    exists: true
+    type: string
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+
+def test_judge_target_verdict_loop_reports_score_delta(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    write_judge_project(tmp_path)
+
+    assert main(["run", "judge-critique"]) == 0
+    config = ProjectConfig.load(tmp_path)
+    initial_eval = evaluate_target(config, "judge-critique")
+    assert initial_eval is not None
+    assert initial_eval.failed == 0
+    assert main(["approve", "judge-critique"]) == 0
+
+    state = ProjectState(tmp_path)
+    judge_manifest = state.latest_manifest_for_target("judge-critique")
+    assert judge_manifest is not None
+    judged_input = next(item for item in judge_manifest["fingerprint_inputs"]["inputs"] if item["path"] == "artifacts/critique.md")
+    verdict = json.loads((tmp_path / "artifacts" / "critique_verdict.json").read_text(encoding="utf-8"))
+    assert verdict["artifact"]["sha256"] == judged_input["sha256"]
+
+    (tmp_path / "context" / "source.md").write_text("traceable: no\n", encoding="utf-8")
+    assert main(["run", "judge-critique"]) == 0
+    failed_eval = evaluate_target(ProjectConfig.load(tmp_path), "judge-critique")
+    assert failed_eval is not None
+    assert failed_eval.failed == 3
+    reasons = [result.reason for result in failed_eval.results]
+    assert "$.scores.traceability value 1 is below minimum 3" in reasons
+
+    compare_text = compare_to_baseline(ProjectConfig.load(tmp_path), "judge-critique")
+    assert "| verdict | `$.scores.traceability` | 5 | 1 | -4 |" in compare_text
+
+
 def test_approval_records_do_not_overwrite_with_same_timestamp(tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
     assert main(["init"]) == 0
